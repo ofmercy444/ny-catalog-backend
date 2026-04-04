@@ -17,6 +17,41 @@ const redis = process.env.REDIS_URL
     })
   : null;
 
+/**
+ * Normalize UI labels to stable keys
+ */
+function normalizeKey(value, fallback = "all") {
+  return String(value || fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/**
+ * Map clothing subtabs to possible asset_type values.
+ * Adjust these to match your DB data over time.
+ */
+function clothingTypeFilters(subtabKey) {
+  const map = {
+    all: [],
+    classic_shirts: ["classic_shirt", "classicshirts"],
+    classic_pants: ["classic_pants", "classicpants"],
+    shirts: ["shirt", "shirts"],
+    jackets: ["jacket", "jackets"],
+    sweaters: ["sweater", "sweaters"],
+    t_shirts: ["tshirt", "t_shirt", "tshirts", "t_shirts"],
+    pants: ["pants", "pant"],
+    shorts: ["shorts", "short"],
+    dresses_and_skirts: ["dress", "dresses", "skirt", "skirts", "dresses_skirts"],
+    shoes: ["shoe", "shoes"],
+    classic_t_shirts: ["classic_tshirt", "classic_t_shirt", "classictshirts", "classic_tshirts"],
+  };
+
+  return map[subtabKey] || [];
+}
+
 app.get("/health", async () => {
   let dbOk = false;
   let redisOk = false;
@@ -42,8 +77,8 @@ app.get("/", async () => ({ message: "Catalog backend running" }));
 
 app.get("/catalog/search", async (req, reply) => {
   try {
-    const category = String(req.query.category || "clothing").trim().toLowerCase();
-    const subtab = String(req.query.subtab || "all").trim().toLowerCase();
+    const category = normalizeKey(req.query.category, "clothing");
+    const subtab = normalizeKey(req.query.subtab, "all");
     const q = String(req.query.q || "").trim();
     const limit = Math.min(Math.max(Number(req.query.limit) || 24, 1), 60);
     const offset = Math.max(Number(req.query.cursor) || 0, 0);
@@ -56,21 +91,43 @@ app.get("/catalog/search", async (req, reply) => {
 
     const where = [];
     const params = [];
-    let i = 1;
+    let p = 1;
 
-    where.push(`LOWER(category) = $${i++}`);
+    // category filter (your DB should contain category like "clothing")
+    where.push(`LOWER(COALESCE(category, '')) = $${p++}`);
     params.push(category);
 
+    // subtab filter:
+    // 1) direct subtab/subcategory match
+    // 2) fallback asset_type match for clothing
     if (subtab !== "all") {
-      // supports either 'subtab' or fallback to 'subcategory'
-      where.push(`LOWER(COALESCE(subtab, subcategory, '')) = $${i++}`);
-      params.push(subtab);
+      const typeFilters = category === "clothing" ? clothingTypeFilters(subtab) : [];
+
+      if (typeFilters.length > 0) {
+        const placeholders = typeFilters.map(() => `$${p++}`);
+        params.push(...typeFilters);
+
+        where.push(`
+          (
+            LOWER(COALESCE(subtab, subcategory, '')) = $${p++}
+            OR LOWER(COALESCE(asset_type, '')) IN (${placeholders.join(", ")})
+          )
+        `);
+        params.push(subtab);
+      } else {
+        where.push(`LOWER(COALESCE(subtab, subcategory, '')) = $${p++}`);
+        params.push(subtab);
+      }
     }
 
     if (q.length > 0) {
-      where.push(`(name ILIKE $${i} OR creator_name ILIKE $${i})`);
+      where.push(`(
+        name ILIKE $${p}
+        OR creator_name ILIKE $${p}
+        OR description ILIKE $${p}
+      )`);
       params.push(`%${q}%`);
-      i++;
+      p++;
     }
 
     const sql = `
@@ -89,9 +146,9 @@ app.get("/catalog/search", async (req, reply) => {
         is_hidden
       FROM catalog_items
       WHERE ${where.join(" AND ")}
-      ORDER BY asset_id DESC
-      LIMIT $${i++}
-      OFFSET $${i++}
+      ORDER BY updated_at DESC NULLS LAST, asset_id DESC
+      LIMIT $${p++}
+      OFFSET $${p++}
     `;
 
     params.push(limit, offset);
@@ -102,6 +159,7 @@ app.get("/catalog/search", async (req, reply) => {
     const result = {
       items: rows,
       nextCursor,
+      debug: { category, subtab, q, limit, offset, count: rows.length },
     };
 
     if (redis) {
