@@ -10,95 +10,109 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
-
-function toInt(value, fallback) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
+const redis = process.env.REDIS_URL
+  ? new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: false,
+    })
+  : null;
 
 app.get("/health", async () => {
   let dbOk = false;
+  let redisOk = false;
+
   try {
     await pool.query("SELECT 1");
     dbOk = true;
-  } catch (_) {}
-  return { ok: true, dbOk };
+  } catch {}
+
+  if (redis) {
+    try {
+      const pong = await redis.ping();
+      redisOk = pong === "PONG";
+    } catch {}
+  } else {
+    redisOk = true;
+  }
+
+  return { ok: dbOk && redisOk, dbOk, redisOk };
 });
 
+app.get("/", async () => ({ message: "Catalog backend running" }));
+
 app.get("/catalog/search", async (req, reply) => {
-  const category = String(req.query.category || "clothing").toLowerCase();
-  const subtab = String(req.query.subtab || "all").toLowerCase();
-  const q = String(req.query.q || "").trim().toLowerCase();
-  const limit = Math.min(Math.max(toInt(req.query.limit, 60), 1), 120);
-  const cursor = req.query.cursor ? toInt(req.query.cursor, null) : null;
+  try {
+    const category = String(req.query.category || "clothing").trim().toLowerCase();
+    const subtab = String(req.query.subtab || "all").trim().toLowerCase();
+    const q = String(req.query.q || "").trim();
+    const limit = Math.min(Math.max(Number(req.query.limit) || 24, 1), 60);
+    const offset = Math.max(Number(req.query.cursor) || 0, 0);
 
-  const cacheKey = `search:${category}:${subtab}:${q}:${limit}:${cursor ?? "none"}`;
-  if (redis) {
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached);
+    const cacheKey = `search:${category}:${subtab}:${q}:${limit}:${offset}`;
+    if (redis) {
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    }
+
+    const where = [];
+    const params = [];
+    let i = 1;
+
+    where.push(`LOWER(category) = $${i++}`);
+    params.push(category);
+
+    if (subtab !== "all") {
+      // supports either 'subtab' or fallback to 'subcategory'
+      where.push(`LOWER(COALESCE(subtab, subcategory, '')) = $${i++}`);
+      params.push(subtab);
+    }
+
+    if (q.length > 0) {
+      where.push(`(name ILIKE $${i} OR creator_name ILIKE $${i})`);
+      params.push(`%${q}%`);
+      i++;
+    }
+
+    const sql = `
+      SELECT
+        asset_id,
+        name,
+        description,
+        creator_id,
+        creator_name,
+        asset_type,
+        category,
+        COALESCE(subtab, subcategory) AS subtab,
+        thumbnail_url,
+        is_offsale,
+        is_limited,
+        is_hidden
+      FROM catalog_items
+      WHERE ${where.join(" AND ")}
+      ORDER BY asset_id DESC
+      LIMIT $${i++}
+      OFFSET $${i++}
+    `;
+
+    params.push(limit, offset);
+
+    const { rows } = await pool.query(sql, params);
+
+    const nextCursor = rows.length === limit ? offset + limit : null;
+    const result = {
+      items: rows,
+      nextCursor,
+    };
+
+    if (redis) {
+      await redis.set(cacheKey, JSON.stringify(result), "EX", 120);
+    }
+
+    return result;
+  } catch (err) {
+    req.log.error(err);
+    return reply.code(500).send({ error: "search_failed" });
   }
-
-  const values = [];
-  const where = [];
-
-  values.push(category);
-  where.push(`LOWER(category) = $${values.length}`);
-
-  if (subtab !== "all") {
-    values.push(subtab);
-    where.push(`LOWER(subtab) = $${values.length}`);
-  }
-
-  if (q.length > 0) {
-    values.push(`%${q}%`);
-    where.push(`(LOWER(name) LIKE $${values.length} OR LOWER(COALESCE(description,'')) LIKE $${values.length})`);
-  }
-
-  if (cursor !== null) {
-    values.push(cursor);
-    where.push(`asset_id < $${values.length}`);
-  }
-
-  values.push(limit + 1);
-
-  const sql = `
-    SELECT
-      asset_id,
-      name,
-      description,
-      creator_id,
-      creator_name,
-      asset_type,
-      category,
-      subtab,
-      thumbnail_url,
-      is_offsale,
-      is_limited,
-      is_hidden
-    FROM catalog_items
-    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-    ORDER BY asset_id DESC
-    LIMIT $${values.length}
-  `;
-
-  const { rows } = await pool.query(sql, values);
-
-  let nextCursor = null;
-  let items = rows;
-  if (rows.length > limit) {
-    const extra = rows[rows.length - 1];
-    nextCursor = String(extra.asset_id);
-    items = rows.slice(0, limit);
-  }
-
-  const payload = { items, nextCursor };
-
-  if (redis) {
-    await redis.set(cacheKey, JSON.stringify(payload), "EX", 60);
-  }
-
-  return payload;
 });
 
 const port = Number(process.env.PORT || 3000);
