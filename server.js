@@ -14,7 +14,6 @@ const pool = new Pool({
 });
 
 const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
-
 const PORT = Number(process.env.PORT || 3000);
 
 const SUBTAB_ALIASES = {
@@ -102,19 +101,6 @@ async function ensureSchema() {
     );
   `);
 
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS description TEXT;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_name TEXT;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_id BIGINT;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_type TEXT;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS item_type TEXT;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'clothing';`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_limited BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_limited_unique BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
-
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_name_lower ON public.catalog_items((lower(name)));`);
@@ -143,15 +129,14 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v2:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v3:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
     }
 
-    const params = [];
+    const params = [category];
     let where = "WHERE lower(i.category) = $1";
-    params.push(category);
 
     if (subtab !== "all") {
       where += ` AND st.subtab_key = $${params.length + 1}`;
@@ -159,7 +144,7 @@ app.get("/catalog/search", async (req, reply) => {
     }
 
     if (q.length > 0) {
-      where += ` AND lower(coalesce(i.name, '')) LIKE $${params.length + 1}`;
+      where += ` AND lower(coalesce(i.name,'')) LIKE $${params.length + 1}`;
       params.push(`%${q}%`);
     }
 
@@ -182,6 +167,7 @@ app.get("/catalog/search", async (req, reply) => {
         i.item_type,
         i.creator_id,
         i.creator_name,
+        i.creator_type,
         i.description,
         CASE
           WHEN coalesce(i.thumbnail_url, '') <> '' THEN i.thumbnail_url
@@ -194,22 +180,27 @@ app.get("/catalog/search", async (req, reply) => {
         i.updated_at,
         COALESCE(st.is_layered, false) AS is_layered,
         CASE
-          WHEN i.creator_id IS NOT NULL THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
+          WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
+            THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
+          WHEN i.creator_id IS NOT NULL
+            THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
           ELSE 'rbxasset://textures/ui/GuiImagePlaceholder.png'
         END AS creator_avatar_url
       FROM public.catalog_items i
-      ${subtab === "all" ? "LEFT JOIN public.catalog_item_subtabs st ON st.asset_id = i.asset_id" : "JOIN public.catalog_item_subtabs st ON st.asset_id = i.asset_id"}
+      ${subtab === "all"
+        ? "LEFT JOIN public.catalog_item_subtabs st ON st.asset_id = i.asset_id"
+        : "JOIN public.catalog_item_subtabs st ON st.asset_id = i.asset_id"}
       ${where}
       ORDER BY ${orderSql}
       LIMIT $${params.length - 1}
       OFFSET $${params.length};
     `;
 
-    const result = await pool.query(sql, params);
+    const { rows } = await pool.query(sql, params);
 
     const response = {
-      items: result.rows,
-      nextOffset: result.rows.length === limit ? offset + limit : null,
+      items: rows,
+      nextOffset: rows.length === limit ? offset + limit : null,
       subtabKey: subtab,
     };
 
