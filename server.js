@@ -233,9 +233,9 @@ app.get("/catalog/search", async (req, reply) => {
 
     // If subtab is too sparse, don't return blank screen.
     const items =
-      subtab === "all"
-        ? fallback.slice(0, limit)
-        : (filtered.length > 0 ? filtered : fallback).slice(0, limit);
+    subtab === "all"
+      ? fallback.slice(0, limit)
+      : filtered.slice(0, limit);
 
     const response = {
       items,
