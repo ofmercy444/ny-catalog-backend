@@ -6,13 +6,12 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-const CATEGORY = 3;
+const CATEGORY = 3; // Roblox catalog category used in your current approach
 const PAGE_LIMIT = 30;
-const MAX_PAGES_PER_SUBTAB = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 3);
-const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 1500);
+const MAX_PAGES_PER_SUBTAB = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 8);
+const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 1200);
 const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-// You can tune keywords over time
 const SUBTABS = [
   { key: "all", keyword: "" },
   { key: "classic_shirts", keyword: "classic shirts" },
@@ -38,15 +37,15 @@ function buildUrl({ keyword, cursor }) {
   url.searchParams.set("Limit", String(PAGE_LIMIT));
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
+
   if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
   if (cursor) url.searchParams.set("Cursor", cursor);
+
   return url.toString();
 }
 
 async function fetchJsonWithRetry(url, tries = 5) {
-  let attempt = 0;
-  while (attempt < tries) {
-    attempt += 1;
+  for (let attempt = 1; attempt <= tries; attempt += 1) {
     const res = await fetch(url, {
       headers: {
         "User-Agent": "ny-catalog-backend/1.0",
@@ -59,7 +58,7 @@ async function fetchJsonWithRetry(url, tries = 5) {
     const text = await res.text().catch(() => "");
     if (res.status === 429) {
       const backoff = 1200 * attempt;
-      console.log(`[429] rate limited, retrying in ${backoff}ms`);
+      console.log(`[429] Rate limited, retrying in ${backoff}ms`);
       await sleep(backoff);
       continue;
     }
@@ -71,9 +70,10 @@ async function fetchJsonWithRetry(url, tries = 5) {
 }
 
 async function ensureSchema() {
+  // Create table if missing
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS catalog_items (
-      asset_id BIGINT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS public.catalog_items (
+      asset_id BIGINT NOT NULL,
       name TEXT NOT NULL,
       description TEXT,
       creator_name TEXT,
@@ -90,22 +90,53 @@ async function ensureSchema() {
     );
   `);
 
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS description TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS creator_name TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS creator_id BIGINT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS creator_type TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS item_type TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'clothing';`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_limited BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_limited_unique BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+  // Ensure required columns exist
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS description TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_name TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_id BIGINT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_type TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS item_type TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'clothing';`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_limited BOOLEAN DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_limited_unique BOOLEAN DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_category ON catalog_items(category);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_item_type ON catalog_items(item_type);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_name_lower ON catalog_items((lower(name)));`);
+  // Normalize key type and data quality
+  await pool.query(`
+    ALTER TABLE public.catalog_items
+    ALTER COLUMN asset_id TYPE BIGINT
+    USING asset_id::bigint;
+  `);
+  await pool.query(`DELETE FROM public.catalog_items WHERE asset_id IS NULL;`);
+  await pool.query(`
+    DELETE FROM public.catalog_items a
+    USING public.catalog_items b
+    WHERE a.asset_id = b.asset_id
+      AND a.ctid < b.ctid;
+  `);
+
+  // Ensure the exact unique constraint name used by ON CONFLICT
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'catalog_items_asset_id_key'
+      ) THEN
+        ALTER TABLE public.catalog_items
+        ADD CONSTRAINT catalog_items_asset_id_key UNIQUE (asset_id);
+      END IF;
+    END $$;
+  `);
+
+  // Helpful indexes
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_category ON public.catalog_items(category);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_item_type ON public.catalog_items(item_type);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_name_lower ON public.catalog_items((lower(name)));`);
 }
 
 function normalizeItem(raw) {
@@ -120,10 +151,18 @@ function normalizeItem(raw) {
     item_type: raw.itemType || raw.assetType || raw.assetTypeName || "",
     category: "clothing",
     thumbnail_url: raw.thumbnailUrl || "",
-    is_offsale: raw.itemRestrictions?.includes?.("Offsale") || raw.isOffsale === true || false,
-    is_limited: raw.itemRestrictions?.includes?.("Limited") || raw.isLimited === true || false,
+    is_offsale:
+      raw.itemRestrictions?.includes?.("Offsale") ||
+      raw.isOffsale === true ||
+      false,
+    is_limited:
+      raw.itemRestrictions?.includes?.("Limited") ||
+      raw.isLimited === true ||
+      false,
     is_limited_unique:
-      raw.itemRestrictions?.includes?.("LimitedUnique") || raw.isLimitedUnique === true || false,
+      raw.itemRestrictions?.includes?.("LimitedUnique") ||
+      raw.isLimitedUnique === true ||
+      false,
     price_robux: Number.isFinite(raw.price) ? raw.price : null,
   };
 }
@@ -131,14 +170,15 @@ function normalizeItem(raw) {
 async function upsertItem(item) {
   await pool.query(
     `
-    INSERT INTO catalog_items (
+    INSERT INTO public.catalog_items (
       asset_id, name, description, creator_name, creator_id, creator_type,
       item_type, category, thumbnail_url, is_offsale, is_limited, is_limited_unique, price_robux, updated_at
     )
     VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW()
     )
-    ON CONFLICT (asset_id) DO UPDATE SET
+    ON CONFLICT ON CONSTRAINT catalog_items_asset_id_key
+    DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
       creator_name = EXCLUDED.creator_name,
@@ -151,7 +191,7 @@ async function upsertItem(item) {
       is_limited = EXCLUDED.is_limited,
       is_limited_unique = EXCLUDED.is_limited_unique,
       price_robux = EXCLUDED.price_robux,
-      updated_at = NOW()
+      updated_at = NOW();
     `,
     [
       item.asset_id,
