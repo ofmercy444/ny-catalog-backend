@@ -1,5 +1,4 @@
 require("dotenv").config();
-
 const Fastify = require("fastify");
 const { Pool } = require("pg");
 const Redis = require("ioredis");
@@ -11,14 +10,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-let redis = null;
-if (process.env.REDIS_URL) {
-  redis = new Redis(process.env.REDIS_URL, { lazyConnect: true });
-  redis.connect().catch(() => {
-    // If Redis fails, API still works without cache
-    redis = null;
-  });
-}
+const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
 
 app.get("/health", async () => ({ ok: true }));
 
@@ -27,28 +19,29 @@ app.get("/catalog/search", async (req, reply) => {
     const category = String(req.query.category || "clothing").toLowerCase();
     const subtab = String(req.query.subtab || "all").toLowerCase();
     const q = String(req.query.q || "").trim().toLowerCase();
-
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `catalog:v1:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
     }
 
     const params = [];
-    let where = "WHERE category = $1";
+    let where = "WHERE 1=1";
+
     params.push(category);
+    where += ` AND lower(category) = $${params.length}`;
 
     if (subtab !== "all") {
       params.push(subtab);
-      where += ` AND subtab_key = $${params.length}`;
+      where += ` AND lower(subtab_key) = $${params.length}`;
     }
 
     if (q.length > 0) {
       params.push(`%${q}%`);
-      where += ` AND LOWER(name) LIKE $${params.length}`;
+      where += ` AND lower(name) LIKE $${params.length}`;
     }
 
     params.push(limit);
@@ -69,12 +62,10 @@ app.get("/catalog/search", async (req, reply) => {
         thumbnail_url,
         is_offsale,
         is_limited,
-        is_limited_unique,
-        price_robux,
         updated_at
       FROM catalog_items
       ${where}
-      ORDER BY updated_at DESC, asset_id DESC
+      ORDER BY asset_id DESC
       LIMIT ${limitParam} OFFSET ${offsetParam};
     `;
 
@@ -93,7 +84,7 @@ app.get("/catalog/search", async (req, reply) => {
     return response;
   } catch (err) {
     req.log.error(err);
-    return reply.code(500).send({ error: "search_failed" });
+    return reply.code(500).send({ error: "catalog_search_failed" });
   }
 });
 
