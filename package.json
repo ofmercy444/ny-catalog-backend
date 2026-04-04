@@ -1,4 +1,11 @@
 {
+  "name": "ny-catalog-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
   "dependencies": {
     "dotenv": "^17.4.0",
     "fastify": "^5.8.4",
