@@ -6,7 +6,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-const CATEGORY = 3; // catalog clothing-related in your current approach
+const CATEGORY = 3;
 const PAGE_LIMIT = 30;
 const MAX_PAGES_PER_SUBTAB = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 3);
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 1500);
@@ -15,17 +15,17 @@ const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") 
 // You can tune keywords over time
 const SUBTABS = [
   { key: "all", keyword: "" },
-  { key: "classic_shirts", keyword: "classic shirt" },
+  { key: "classic_shirts", keyword: "classic shirts" },
   { key: "classic_pants", keyword: "classic pants" },
-  { key: "shirts", keyword: "shirt" },
+  { key: "shirts", keyword: "shirts" },
   { key: "jackets", keyword: "jacket" },
   { key: "sweaters", keyword: "sweater" },
-  { key: "t_shirts", keyword: "t-shirt" },
+  { key: "t_shirts", keyword: "t shirts" },
   { key: "pants", keyword: "pants" },
   { key: "shorts", keyword: "shorts" },
-  { key: "dresses_skirts", keyword: "dress skirt" },
-  { key: "shoes", keyword: "shoes" },
-  { key: "classic_t_shirts", keyword: "classic t-shirt" },
+  { key: "dresses_skirts", keyword: "dresses skirts" },
+  { key: "shoes", keyword: "shoes footwear" },
+  { key: "classic_t_shirts", keyword: "classic t shirts" },
 ];
 
 function sleep(ms) {
@@ -71,7 +71,6 @@ async function fetchJsonWithRetry(url, tries = 5) {
 }
 
 async function ensureSchema() {
-  // In case table exists with older shape, add missing cols safely
   await pool.query(`
     CREATE TABLE IF NOT EXISTS catalog_items (
       asset_id BIGINT PRIMARY KEY,
@@ -81,7 +80,7 @@ async function ensureSchema() {
       creator_id BIGINT,
       creator_type TEXT,
       item_type TEXT,
-      subtab_key TEXT,
+      category TEXT DEFAULT 'clothing',
       thumbnail_url TEXT,
       is_offsale BOOLEAN DEFAULT FALSE,
       is_limited BOOLEAN DEFAULT FALSE,
@@ -96,7 +95,7 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS creator_id BIGINT;`);
   await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS creator_type TEXT;`);
   await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS item_type TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS subtab_key TEXT;`);
+  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'clothing';`);
   await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;`);
   await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
   await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_limited BOOLEAN DEFAULT FALSE;`);
@@ -104,12 +103,12 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
   await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_subtab ON catalog_items(subtab_key);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_category ON catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_item_type ON catalog_items(item_type);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_name_lower ON catalog_items((lower(name)));`);
 }
 
-function normalizeItem(raw, subtabKey) {
+function normalizeItem(raw) {
   const creator = raw.creator || {};
   return {
     asset_id: Number(raw.id),
@@ -119,7 +118,7 @@ function normalizeItem(raw, subtabKey) {
     creator_id: creator.id ? Number(creator.id) : null,
     creator_type: creator.type || "",
     item_type: raw.itemType || raw.assetType || raw.assetTypeName || "",
-    subtab_key: subtabKey,
+    category: "clothing",
     thumbnail_url: raw.thumbnailUrl || "",
     is_offsale: raw.itemRestrictions?.includes?.("Offsale") || raw.isOffsale === true || false,
     is_limited: raw.itemRestrictions?.includes?.("Limited") || raw.isLimited === true || false,
@@ -134,7 +133,7 @@ async function upsertItem(item) {
     `
     INSERT INTO catalog_items (
       asset_id, name, description, creator_name, creator_id, creator_type,
-      item_type, subtab_key, thumbnail_url, is_offsale, is_limited, is_limited_unique, price_robux, updated_at
+      item_type, category, thumbnail_url, is_offsale, is_limited, is_limited_unique, price_robux, updated_at
     )
     VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW()
@@ -146,7 +145,7 @@ async function upsertItem(item) {
       creator_id = EXCLUDED.creator_id,
       creator_type = EXCLUDED.creator_type,
       item_type = EXCLUDED.item_type,
-      subtab_key = EXCLUDED.subtab_key,
+      category = EXCLUDED.category,
       thumbnail_url = EXCLUDED.thumbnail_url,
       is_offsale = EXCLUDED.is_offsale,
       is_limited = EXCLUDED.is_limited,
@@ -162,7 +161,7 @@ async function upsertItem(item) {
       item.creator_id,
       item.creator_type,
       item.item_type,
-      item.subtab_key,
+      item.category,
       item.thumbnail_url,
       item.is_offsale,
       item.is_limited,
@@ -183,7 +182,7 @@ async function crawlSubtab(subtab) {
     const rows = Array.isArray(json.data) ? json.data : [];
 
     for (const raw of rows) {
-      const item = normalizeItem(raw, subtab.key);
+      const item = normalizeItem(raw);
       if (!Number.isFinite(item.asset_id)) continue;
       await upsertItem(item);
       upserts += 1;
