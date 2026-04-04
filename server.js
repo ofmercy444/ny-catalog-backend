@@ -19,27 +19,49 @@ const SUBTAB_ALIASES = {
   classicshirts: "classic_shirts",
   "classic shirts": "classic_shirts",
   classic_shirts: "classic_shirts",
+
   classicpants: "classic_pants",
   "classic pants": "classic_pants",
   classic_pants: "classic_pants",
+
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
+
   tshirts: "t_shirts",
   "t-shirts": "t_shirts",
   "t shirts": "t_shirts",
   t_shirts: "t_shirts",
+
   pants: "pants",
   shorts: "shorts",
+
   dressesandskirts: "dresses_skirts",
   "dresses & skirts": "dresses_skirts",
   "dresses and skirts": "dresses_skirts",
   dresses_skirts: "dresses_skirts",
+
   shoes: "shoes",
+
   classictshirts: "classic_t_shirts",
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
+};
+
+const SUBTAB_KEYWORDS = {
+  all: [],
+  classic_shirts: ["classic shirt", "classic tee", "classic t-shirt"],
+  classic_pants: ["classic pants"],
+  shirts: ["shirt", "tee", "top"],
+  jackets: ["jacket", "coat", "hoodie", "blazer", "outerwear"],
+  sweaters: ["sweater", "cardigan", "knit", "pullover"],
+  t_shirts: ["t-shirt", "tshirt", "tee", "graphic tee"],
+  pants: ["pants", "jeans", "trousers", "cargo"],
+  shorts: ["shorts"],
+  dresses_skirts: ["dress", "skirt", "gown"],
+  shoes: ["shoe", "shoes", "sneaker", "boot", "heels", "heel", "sandal", "loafer"],
+  classic_t_shirts: ["classic t-shirt", "classic tshirt", "classic tee"],
 };
 
 function normalizeTabKey(raw) {
@@ -52,48 +74,47 @@ function normalizeTabKey(raw) {
   return SUBTAB_ALIASES[cleaned] || SUBTAB_ALIASES[compact] || "all";
 }
 
+function includesAny(text, words) {
+  for (const w of words) {
+    if (text.includes(w)) return true;
+  }
+  return false;
+}
+
 function matchesSubtab(item, subtabKey) {
   if (subtabKey === "all") return true;
 
-  const itemType = String(item.item_type || "").toLowerCase();
   const name = String(item.name || "").toLowerCase();
+  const itemType = String(item.item_type || "").toLowerCase();
+  const desc = String(item.description || "").toLowerCase();
+  const text = `${name} ${itemType} ${desc}`;
 
-  switch (subtabKey) {
-    case "classic_shirts":
-      return itemType.includes("shirt") && name.includes("classic");
-    case "classic_pants":
-      return itemType.includes("pants") && name.includes("classic");
-    case "shirts":
-      return itemType.includes("shirt") && !name.includes("classic");
-    case "jackets":
-      return itemType.includes("jacket");
-    case "sweaters":
-      return itemType.includes("sweater");
-    case "t_shirts":
-      return itemType.includes("tshirt") || itemType.includes("t-shirt");
-    case "pants":
-      return itemType.includes("pants") && !name.includes("classic");
-    case "shorts":
-      return itemType.includes("shorts") || name.includes("shorts");
-    case "dresses_skirts":
-      return (
-        itemType.includes("dress") ||
-        itemType.includes("skirt") ||
-        name.includes("dress") ||
-        name.includes("skirt")
-      );
-    case "shoes":
-      return itemType.includes("shoe") || name.includes("shoe");
-    case "classic_t_shirts":
-      return (itemType.includes("tshirt") || itemType.includes("t-shirt")) && name.includes("classic");
-    default:
-      return true;
+  // broad keyword gate first
+  const keywords = SUBTAB_KEYWORDS[subtabKey] || [];
+  let hit = keywords.length === 0 || includesAny(text, keywords);
+
+  // refinement rules
+  if (subtabKey === "classic_shirts") {
+    hit = hit && name.includes("classic");
+  } else if (subtabKey === "classic_pants") {
+    hit = hit && name.includes("classic");
+  } else if (subtabKey === "classic_t_shirts") {
+    hit = hit && name.includes("classic");
+  } else if (subtabKey === "shirts") {
+    // shirts should not capture classic variants heavily
+    if (name.includes("classic")) hit = false;
+  } else if (subtabKey === "pants") {
+    if (name.includes("classic")) hit = false;
+  } else if (subtabKey === "t_shirts") {
+    if (name.includes("classic")) hit = false;
   }
+
+  return hit;
 }
 
 async function ensureSchema() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS catalog_items (
+    CREATE TABLE IF NOT EXISTS public.catalog_items (
       asset_id BIGINT PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT,
@@ -111,22 +132,22 @@ async function ensureSchema() {
     );
   `);
 
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'clothing';`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS description TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS creator_name TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS creator_id BIGINT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS creator_type TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS item_type TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_limited BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS is_limited_unique BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
-  await pool.query(`ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS description TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_name TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_id BIGINT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS creator_type TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS item_type TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'clothing';`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_limited BOOLEAN DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS is_limited_unique BOOLEAN DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_category ON catalog_items(category);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_item_type ON catalog_items(item_type);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_name_lower ON catalog_items((lower(name)));`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_category ON public.catalog_items(category);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_item_type ON public.catalog_items(item_type);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_name_lower ON public.catalog_items((lower(name)));`);
 }
 
 let schemaReady = false;
@@ -154,21 +175,25 @@ app.get("/catalog/search", async (req, reply) => {
 
     const params = [category];
     let where = "WHERE lower(category) = $1";
+
     if (q.length > 0) {
       params.push(`%${q}%`);
       where += ` AND lower(name) LIKE $${params.length}`;
     }
 
-    // Because subtab classification is computed, we may need to scan multiple DB chunks.
-    const dbChunkSize = Math.max(limit * 5, 120);
+    // Pull a bigger DB chunk, filter in JS to avoid hard misses.
+    const dbChunkSize = Math.max(limit * 6, 180);
     let dbOffset = offset;
     let passes = 0;
-    const maxPasses = 8;
-    const items = [];
+    const maxPasses = 10;
 
-    while (items.length < limit && passes < maxPasses) {
+    const filtered = [];
+    const fallback = [];
+
+    while (filtered.length < limit && passes < maxPasses) {
       passes += 1;
       const scanParams = [...params, dbChunkSize, dbOffset];
+
       const sql = `
         SELECT
           asset_id,
@@ -184,7 +209,7 @@ app.get("/catalog/search", async (req, reply) => {
           is_limited_unique,
           price_robux,
           updated_at
-        FROM catalog_items
+        FROM public.catalog_items
         ${where}
         ORDER BY updated_at DESC
         LIMIT $${scanParams.length - 1} OFFSET $${scanParams.length};
@@ -195,17 +220,25 @@ app.get("/catalog/search", async (req, reply) => {
       if (rows.length === 0) break;
 
       for (const row of rows) {
-        if (!matchesSubtab(row, subtab)) continue;
-        items.push(row);
-        if (items.length >= limit) break;
+        fallback.push(row);
+        if (matchesSubtab(row, subtab)) {
+          filtered.push(row);
+          if (filtered.length >= limit) break;
+        }
       }
 
       dbOffset += rows.length;
       if (rows.length < dbChunkSize) break;
     }
 
+    // If subtab is too sparse, don't return blank screen.
+    const items =
+      subtab === "all"
+        ? fallback.slice(0, limit)
+        : (filtered.length > 0 ? filtered : fallback).slice(0, limit);
+
     const response = {
-      items: items.slice(0, limit),
+      items,
       nextOffset: items.length === limit ? dbOffset : null,
       subtabKey: subtab,
     };
