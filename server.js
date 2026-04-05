@@ -235,8 +235,9 @@ async function ensureSchema() {
       creator_name TEXT,
       creator_id BIGINT,
       creator_type TEXT,
+      bundle_type TEXT,
       category TEXT DEFAULT 'clothing',
-      subcategory TEXT,
+      subcategory TEXT DEFAULT 'misc',
       item_type TEXT DEFAULT 'bundle',
       thumbnail_url TEXT,
       is_offsale BOOLEAN DEFAULT FALSE,
@@ -251,6 +252,7 @@ async function ensureSchema() {
       asset_id BIGINT NOT NULL,
       role TEXT,
       asset_type_id INTEGER,
+      sort_order INTEGER DEFAULT 0,
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (bundle_id, asset_id)
     );
@@ -258,8 +260,10 @@ async function ensureSchema() {
 
   // Compatibility for older existing tables.
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
-  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS subcategory TEXT DEFAULT 'misc';`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'bundle';`);
+  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
@@ -267,11 +271,10 @@ async function ensureSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_name_lower ON public.catalog_items((lower(name)));`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_creator_name_lower ON public.catalog_items((lower(creator_name)));`);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_category_subcat ON public.catalog_bundles(category, subcategory);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_subcategory ON public.catalog_bundles(subcategory);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_name_lower ON public.catalog_bundles((lower(name)));`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_creator_name_lower ON public.catalog_bundles((lower(creator_name)));`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_asset_links_bundle ON public.bundle_asset_links(bundle_id);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_asset_links_asset ON public.bundle_asset_links(asset_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_bundle_id ON public.bundle_asset_links(bundle_id);`);
 }
 
 let schemaReady = false;
@@ -299,7 +302,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v27:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v28:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -311,7 +314,19 @@ app.get("/catalog/search", async (req, reply) => {
     if (spec.mode === "shoes_bundle_parents") {
       const sql = `
         SELECT
-          b.*,
+          b.bundle_id,
+          b.name,
+          b.description,
+          b.creator_name,
+          b.creator_id,
+          b.creator_type,
+          b.category,
+          b.subcategory,
+          b.item_type,
+          b.thumbnail_url,
+          b.is_offsale,
+          b.price_robux,
+          b.updated_at,
           CASE
             WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
               THEN 'rbxthumb://type=GroupIcon&id=' || b.creator_id::text || '&w=150&h=150'
@@ -374,8 +389,6 @@ app.get("/catalog/search", async (req, reply) => {
             i.price_robux,
             i.updated_at,
             false AS is_bundle_parent,
-            'asset'::text AS detail_kind,
-            NULL::text AS role,
             CASE
               WHEN i.asset_type_id = ANY($6::int[]) THEN 0
               ELSE 1
@@ -414,14 +427,12 @@ app.get("/catalog/search", async (req, reply) => {
             b.creator_type,
             b.description,
             b.thumbnail_url,
-            b.is_offsale,
+            COALESCE(b.is_offsale, false) AS is_offsale,
             false AS is_limited,
             false AS is_limited_unique,
             b.price_robux,
             b.updated_at,
             true AS is_bundle_parent,
-            'bundle'::text AS detail_kind,
-            NULL::text AS role,
             0 AS sort_bucket,
             CASE
               WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
