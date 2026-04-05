@@ -12,10 +12,27 @@ const pool = new Pool({
 const CATEGORY = 3;
 const PAGE_LIMIT = 30;
 const MAX_PAGES_PER_PASS = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 3);
+const SHOES_MAX_PAGES_PER_PASS = Number(
+  process.env.CRAWL_SHOES_PAGES_PER_PASS || Math.max(MAX_PAGES_PER_PASS, 6)
+);
+
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 2200);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 120);
 const INCLUDE_NOT_FOR_SALE =
   String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
+
+// Stronger shoe crawl coverage to populate type 70/71 faster
+const SHOE_KEYWORDS = [
+  "layered shoes",
+  "3d shoes",
+  "shoe accessory",
+  "left shoe",
+  "right shoe",
+  "sneakers",
+  "boots",
+  "heels",
+  "shoe",
+];
 
 const CRAWL_PLAN = [
   { key: "all", passes: [{ keyword: "" }] },
@@ -31,7 +48,13 @@ const CRAWL_PLAN = [
   { key: "pants", passes: [{ keyword: "layered pants" }, { keyword: "pants" }] },
   { key: "shorts", passes: [{ keyword: "layered shorts" }, { keyword: "shorts" }] },
   { key: "dresses_skirts", passes: [{ keyword: "layered dress skirt" }, { keyword: "dress skirt" }] },
-  { key: "shoes", passes: [{ keyword: "layered shoes" }, { keyword: "shoes" }] },
+
+  // Shoes receives expanded keyword coverage + more pages/pass.
+  {
+    key: "shoes",
+    pagesPerPass: SHOES_MAX_PAGES_PER_PASS,
+    passes: SHOE_KEYWORDS.map((keyword) => ({ keyword })),
+  },
 ];
 
 const memoryAssetTypeCache = new Map();
@@ -294,13 +317,13 @@ async function upsertItem(item) {
   );
 }
 
-async function crawlPass(passConfig) {
+async function crawlPass(passConfig, maxPagesForThisPass) {
   let cursor = null;
   let pages = 0;
   let upserts = 0;
   let enriched = 0;
 
-  while (pages < MAX_PAGES_PER_PASS) {
+  while (pages < maxPagesForThisPass) {
     const url = buildUrl({ keyword: passConfig.keyword, cursor });
     const json = await fetchJsonWithRetry(url);
     const rows = Array.isArray(json.data) ? json.data : [];
@@ -322,7 +345,7 @@ async function crawlPass(passConfig) {
   }
 
   console.log(
-    `[crawl-pass] keyword="${passConfig.keyword}" pages=${pages}, upserts=${upserts}, enrichedType=${enriched}`
+    `[crawl-pass] keyword="${passConfig.keyword}" pages=${pages}, maxPages=${maxPagesForThisPass}, upserts=${upserts}, enrichedType=${enriched}`
   );
 }
 
@@ -334,8 +357,10 @@ async function main() {
     await ensureSchema();
 
     for (const tab of CRAWL_PLAN) {
+      const pagesForTab = Number(tab.pagesPerPass || MAX_PAGES_PER_PASS);
+
       for (const pass of tab.passes) {
-        await crawlPass(pass);
+        await crawlPass(pass, pagesForTab);
         await sleep(DELAY_MS);
       }
     }
