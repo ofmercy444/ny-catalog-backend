@@ -41,7 +41,6 @@ const SUBTAB_ALIASES = {
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
-
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -257,7 +256,7 @@ async function ensureSchema() {
     );
   `);
 
-  -- compatibility for older existing tables
+  // Compatibility for older existing tables.
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'bundle';`);
