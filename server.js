@@ -103,8 +103,6 @@ async function ensureSchema() {
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_name_lower ON public.catalog_items((lower(name)));`);
-
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_subtabs_key ON public.catalog_item_subtabs(subtab_key);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_subtabs_layered ON public.catalog_item_subtabs(subtab_key, is_layered);`);
 }
@@ -129,7 +127,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v3:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v4:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -169,16 +167,19 @@ app.get("/catalog/search", async (req, reply) => {
         i.creator_name,
         i.creator_type,
         i.description,
-        CASE
-          WHEN coalesce(i.thumbnail_url, '') <> '' THEN i.thumbnail_url
-          ELSE 'rbxthumb://type=Asset&id=' || i.asset_id::text || '&w=420&h=420'
-        END AS thumbnail_url,
+
+        -- stable generated thumbs
+        'rbxthumb://type=Asset&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_url,
+        'rbxthumb://type=BundleThumbnail&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_bundle_url,
+        COALESCE(i.thumbnail_url, '') AS thumbnail_raw_url,
+
         i.is_offsale,
         i.is_limited,
         i.is_limited_unique,
         i.price_robux,
         i.updated_at,
         COALESCE(st.is_layered, false) AS is_layered,
+
         CASE
           WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
             THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
