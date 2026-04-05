@@ -127,8 +127,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    // bump namespace so stale cached ordering cannot survive
-    const cacheKey = `search:v8:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v9:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -143,8 +142,8 @@ app.get("/catalog/search", async (req, reply) => {
     }
 
     let sql;
+
     if (subtab === "all") {
-      // all tab should NOT apply layered-first rule
       params.push(limit, offset);
       sql = `
         SELECT
@@ -190,6 +189,7 @@ app.get("/catalog/search", async (req, reply) => {
       }
 
       params.push(limit, offset);
+
       sql = `
         SELECT
           i.asset_id,

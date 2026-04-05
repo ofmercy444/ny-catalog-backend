@@ -33,10 +33,6 @@ const CLASSIC_TABS = new Set([
   "classic_t_shirts",
 ]);
 
-// Two-pass strategy for layered tabs:
-// pass 1 => layered-intent keyword
-// pass 2 => broad fallback keyword
-// We preserve layered=true once found.
 const CRAWL_PLAN = [
   { key: "all", passes: [{ keyword: "", intent: "all" }] },
 
@@ -45,41 +41,45 @@ const CRAWL_PLAN = [
   { key: "classic_t_shirts", passes: [{ keyword: "classic t shirt", intent: "classic" }] },
 
   { key: "shirts", passes: [
-    { keyword: "layered shirt ugc", intent: "layered" },
+    { keyword: "layered shirt", intent: "layered" },
     { keyword: "shirt", intent: "fallback" },
   ]},
   { key: "jackets", passes: [
-    { keyword: "layered jacket ugc", intent: "layered" },
+    { keyword: "layered jacket", intent: "layered" },
     { keyword: "jacket", intent: "fallback" },
   ]},
   { key: "sweaters", passes: [
-    { keyword: "layered sweater ugc", intent: "layered" },
+    { keyword: "layered sweater", intent: "layered" },
     { keyword: "sweater", intent: "fallback" },
   ]},
   { key: "t_shirts", passes: [
-    { keyword: "layered t shirt ugc", intent: "layered" },
+    { keyword: "layered t shirt", intent: "layered" },
     { keyword: "t shirt", intent: "fallback" },
   ]},
   { key: "pants", passes: [
-    { keyword: "layered pants ugc", intent: "layered" },
+    { keyword: "layered pants", intent: "layered" },
     { keyword: "pants", intent: "fallback" },
   ]},
   { key: "shorts", passes: [
-    { keyword: "layered shorts ugc", intent: "layered" },
+    { keyword: "layered shorts", intent: "layered" },
     { keyword: "shorts", intent: "fallback" },
   ]},
   { key: "dresses_skirts", passes: [
-    { keyword: "layered dress skirt ugc", intent: "layered" },
+    { keyword: "layered dress skirt", intent: "layered" },
     { keyword: "dress skirt", intent: "fallback" },
   ]},
   { key: "shoes", passes: [
-    { keyword: "ugc shoes layered", intent: "layered" },
+    { keyword: "layered shoes", intent: "layered" },
     { keyword: "shoes", intent: "fallback" },
   ]},
 ];
 
 const CLASSIC_TEXT_RE =
   /(classic shirt|classic pants|classic t-shirt|classic t shirt|template|2d clothing|2d)/i;
+
+// STRICT layered signals (ugc alone does NOT qualify)
+const STRONG_LAYERED_RE =
+  /(layered|shirt accessory|pants accessory|jacket accessory|sweater accessory|shorts accessory|dress skirt accessory|shoe accessory|left shoe|right shoe|3d|mesh)/i;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -208,13 +208,15 @@ function computeLayeredFlag(subtabKey, passIntent, item) {
 
   const text = `${item.name || ""} ${item.description || ""}`.toLowerCase();
 
-  // Never mark obvious classic text as layered.
+  // Never layered if clearly classic/2D template-ish
   if (CLASSIC_TEXT_RE.test(text)) return false;
 
-  // If it came from layered-intent pass and is not classic text, treat as layered.
-  if (passIntent === "layered") return true;
+  // Layered pass must include strong layered signals
+  if (passIntent === "layered") {
+    return STRONG_LAYERED_RE.test(text);
+  }
 
-  // Fallback pass should be non-layered by default.
+  // Fallback pass is non-layered
   return false;
 }
 
@@ -267,7 +269,6 @@ async function upsertSubtabMapping(assetId, subtabKey, isLayered) {
     INSERT INTO public.catalog_item_subtabs (asset_id, subtab_key, is_layered, updated_at)
     VALUES ($1, $2, $3, NOW())
     ON CONFLICT (asset_id, subtab_key) DO UPDATE SET
-      -- preserve true if ever layered in this run
       is_layered = public.catalog_item_subtabs.is_layered OR EXCLUDED.is_layered,
       updated_at = NOW()
     `,
@@ -283,7 +284,7 @@ async function crawlPass(subtabKey, passConfig) {
   let cursor = null;
   let pages = 0;
   let upserts = 0;
-  let layeredCount = 0;
+  let layeredMapped = 0;
 
   while (pages < MAX_PAGES_PER_PASS) {
     const url = buildUrl({ keyword: passConfig.keyword, cursor });
@@ -297,7 +298,7 @@ async function crawlPass(subtabKey, passConfig) {
       await upsertItem(item);
 
       const isLayered = computeLayeredFlag(subtabKey, passConfig.intent, item);
-      if (isLayered) layeredCount += 1;
+      if (isLayered) layeredMapped += 1;
 
       await upsertSubtabMapping(item.asset_id, subtabKey, isLayered);
       upserts += 1;
@@ -306,11 +307,12 @@ async function crawlPass(subtabKey, passConfig) {
     pages += 1;
     cursor = json.nextPageCursor || null;
     if (!cursor) break;
+
     await sleep(DELAY_MS);
   }
 
   console.log(
-    `[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | intent=${passConfig.intent} | pages=${pages}, upserts=${upserts}, layeredMapped=${layeredCount}`
+    `[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | intent=${passConfig.intent} | pages=${pages}, upserts=${upserts}, layeredMapped=${layeredMapped}`
   );
 }
 
@@ -322,7 +324,6 @@ async function main() {
     await ensureSchema();
 
     for (const tab of CRAWL_PLAN) {
-      // Fresh mapping each run to eliminate stale wrong flags.
       await rebuildSubtabMappings(tab.key);
 
       for (const pass of tab.passes) {
