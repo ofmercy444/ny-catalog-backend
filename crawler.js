@@ -20,15 +20,22 @@ const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 6000);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 900);
 const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 7);
+const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 6);
 const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 5);
 const RETRY_BASE_MS = Number(process.env.CRAWL_RETRY_BASE_MS || 1200);
-const MAX_RETRY_BACKOFF_MS = Number(process.env.CRAWL_MAX_RETRY_BACKOFF_MS || 30000);
+const MAX_RETRY_BACKOFF_MS = Number(process.env.CRAWL_MAX_RETRY_BACKOFF_MS || 25000);
 
-const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 60000);
-const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 6);
+const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 90000);
+const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 4);
 
 const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 80);
+
+const MAX_CORE_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CORE_TERMS_PER_TAB || 8);
+const MAX_BOOST_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_BOOST_TERMS_PER_TAB || 10);
+const MAX_LONGTAIL_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_LONGTAIL_TERMS_PER_TAB || 8);
+const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 18);
+
+const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 6);
 
 const SHOE_LEFT_TYPE = 70;
 const SHOE_RIGHT_TYPE = 71;
@@ -51,28 +58,11 @@ const ASSET_TYPE_NAME_TO_ID = {
   dressskirtaccessory: 72,
 };
 
-const SUBTAB_KEYWORDS = {
-  classic_shirts: [
-    "classic shirt",
-    "2d shirt",
-    "template shirt",
-    "legacy shirt",
-    "retro shirt",
-  ],
-  classic_pants: [
-    "classic pants",
-    "2d pants",
-    "template pants",
-    "legacy pants",
-    "retro pants",
-  ],
-  classic_t_shirts: [
-    "classic t-shirt",
-    "classic tee",
-    "2d t shirt",
-    "graphic classic tee",
-    "legacy tee",
-  ],
+const TAB_CORE = {
+  classic_shirts: ["classic shirt", "2d shirt", "template shirt", "legacy shirt", "retro shirt"],
+  classic_pants: ["classic pants", "2d pants", "template pants", "legacy pants", "retro pants"],
+  classic_t_shirts: ["classic t-shirt", "classic tee", "2d t shirt", "graphic classic tee", "legacy tee"],
+
   shirts: [
     "layered shirt",
     "shirt",
@@ -80,28 +70,18 @@ const SUBTAB_KEYWORDS = {
     "blouse",
     "crop top",
     "baby tee",
-    "off shoulder",
-    "button up",
     "tank top",
     "cami",
-    "corset top",
-    "y2k top",
-    "coquette top",
   ],
   jackets: [
     "layered jacket",
     "jacket",
     "hoodie",
     "coat",
-    "zip up",
     "puffer",
     "bomber jacket",
     "varsity jacket",
     "windbreaker",
-    "blazer",
-    "trench coat",
-    "denim jacket",
-    "leather jacket",
   ],
   sweaters: [
     "layered sweater",
@@ -111,11 +91,7 @@ const SUBTAB_KEYWORDS = {
     "pullover",
     "crewneck",
     "turtleneck",
-    "v neck sweater",
     "chunky knit",
-    "cable knit",
-    "cropped sweater",
-    "oversized sweater",
   ],
   t_shirts: [
     "layered t shirt",
@@ -123,30 +99,19 @@ const SUBTAB_KEYWORDS = {
     "t shirt",
     "tee",
     "graphic tee",
-    "baby tee",
     "vintage tee",
     "band tee",
     "logo tee",
-    "oversized tee",
-    "fitted tee",
-    "y2k tee",
   ],
   pants: [
     "layered pants",
     "pants",
     "jeans",
-    "trousers",
     "cargo pants",
     "joggers",
     "sweatpants",
-    "chinos",
-    "slacks",
-    "parachute pants",
     "wide leg pants",
-    "flare pants",
     "baggy jeans",
-    "low rise pants",
-    "high waisted pants",
   ],
   shorts: [
     "layered shorts",
@@ -157,9 +122,6 @@ const SUBTAB_KEYWORDS = {
     "bike shorts",
     "running shorts",
     "bermuda shorts",
-    "mini shorts",
-    "high waisted shorts",
-    "low rise shorts",
   ],
   dresses_skirts: [
     "layered dress",
@@ -169,17 +131,159 @@ const SUBTAB_KEYWORDS = {
     "mini dress",
     "midi dress",
     "maxi dress",
-    "sundress",
-    "slip dress",
-    "gown",
-    "mini skirt",
     "pleated skirt",
-    "tennis skirt",
-    "maxi skirt",
-    "coquette dress",
-    "y2k dress",
   ],
 };
+
+const TAB_BOOST = {
+  shirts: [
+    "off shoulder top",
+    "corset top",
+    "button up shirt",
+    "halter top",
+    "tube top",
+    "tie-front top",
+    "ruched top",
+    "mock neck top",
+    "longline top",
+    "structured top",
+    "y2k top",
+    "coquette top",
+  ],
+  jackets: [
+    "blazer",
+    "trench coat",
+    "denim jacket",
+    "leather jacket",
+    "shacket",
+    "moto jacket",
+    "biker jacket",
+    "aviator jacket",
+    "quilted jacket",
+    "field jacket",
+    "duster coat",
+    "cape coat",
+  ],
+  sweaters: [
+    "v neck sweater",
+    "cable knit",
+    "cropped sweater",
+    "oversized sweater",
+    "varsity sweater",
+    "fuzzy knit",
+    "mohair sweater",
+    "sweater dress",
+  ],
+  t_shirts: [
+    "baby tee",
+    "oversized tee",
+    "fitted tee",
+    "print tee",
+    "y2k tee",
+    "streetwear tee",
+    "graphic t shirt",
+  ],
+  pants: [
+    "flare pants",
+    "low rise pants",
+    "high waisted pants",
+    "parachute pants",
+    "carpenter pants",
+    "utility pants",
+    "pleated trousers",
+    "pinstripe trousers",
+    "paperbag waist pants",
+    "split hem pants",
+    "coated jeans",
+    "tapered trousers",
+  ],
+  shorts: [
+    "high waisted shorts",
+    "low rise shorts",
+    "mini shorts",
+    "tailored shorts",
+    "boxer shorts style",
+    "jorts",
+  ],
+  dresses_skirts: [
+    "slip dress",
+    "gown",
+    "tennis skirt",
+    "a-line dress",
+    "bodycon dress",
+    "corset dress",
+    "tiered dress",
+    "asymmetrical skirt",
+    "slit skirt",
+    "wrap skirt",
+    "babydoll dress",
+    "cami dress",
+  ],
+};
+
+const TAB_LONGTAIL = {
+  shirts: ["henley top", "shirred top", "tunic top", "one shoulder top", "bardot top", "keyhole top"],
+  jackets: ["raincoat jacket", "sherpa jacket", "utility jacket", "nylon jacket", "shell jacket", "puffer vest"],
+  sweaters: ["intarsia knit", "ribbed knit sweater", "open knit top", "jersey knit top", "mock neck knit"],
+  t_shirts: ["washed tee", "minimal tee", "logo print tee", "boxy tee", "cropped graphic tee"],
+  pants: ["stirrup pants", "barrel jeans", "horseshoe jeans", "stacked jeans", "ripstop pants", "tech cargo"],
+  shorts: ["boyshort shorts", "utility shorts", "micro shorts", "denim cutoffs", "running short shorts"],
+  dresses_skirts: ["drop-waist dress", "empire waist dress", "prairie dress", "bubble skirt", "godet skirt"],
+};
+
+const GLOBAL_STYLE_TERMS = [
+  "haute couture",
+  "ready-to-wear",
+  "pret a porter",
+  "runway inspired",
+  "editorial inspired",
+  "high fashion",
+  "luxury streetwear",
+  "quiet luxury",
+  "loud luxury",
+  "minimal luxe",
+  "street luxe",
+  "urban chic",
+  "statement look",
+  "capsule wardrobe",
+  "signature style",
+  "timeless style",
+  "heritage style",
+  "dark coquette",
+  "soft grunge",
+  "kawaii goth",
+  "street goth",
+  "cyber y2k",
+  "futuristic y2k",
+  "digitalcore",
+  "virtualcore",
+  "metaverse fashion",
+  "avatarcore",
+  "animecore",
+  "mangacore",
+  "scenecore",
+  "vampcore",
+  "celestialcore",
+  "galaxycore",
+  "spacecore",
+  "forestcore",
+  "oceancore",
+  "royalcore",
+  "princesscore",
+  "gothic lolita",
+  "sweet lolita",
+  "classic lolita",
+  "decora kei",
+  "visual kei",
+  "gyaru style",
+  "hime gyaru",
+  "ulzzang fashion",
+  "kfashion",
+  "idol style",
+  "harajuku style",
+  "main character energy",
+  "model off duty",
+];
 
 const SHOE_BUNDLE_KEYWORDS = [
   "shoes",
@@ -204,15 +308,22 @@ const SHOE_BUNDLE_KEYWORDS = [
   "mary jane",
   "oxford shoes",
   "chunky shoes",
-  "y2k shoes",
-  "coquette shoes",
+  "kitten heels",
+  "block heels",
+  "slingback heels",
+  "court shoes",
+  "penny loafers",
+  "tassel loafers",
+  "platform sandals",
+  "gladiator sandals",
+  "lug sole boots",
 ];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function jitter(max = 450) {
+function jitter(max = 500) {
   return Math.floor(Math.random() * max);
 }
 
@@ -272,6 +383,28 @@ function buildSearchUrl({ category, keyword, cursor, limit }) {
   return url.toString();
 }
 
+function hashSeed(s) {
+  let h = 2166136261;
+  const str = String(s || "");
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h >>> 0);
+}
+
+function rotatedSlice(list, maxCount, seedKey) {
+  const arr = [...new Set((list || []).filter(Boolean))];
+  if (arr.length <= maxCount) return arr;
+  const seed = hashSeed(seedKey);
+  const start = seed % arr.length;
+  const out = [];
+  for (let i = 0; i < maxCount; i += 1) {
+    out.push(arr[(start + i) % arr.length]);
+  }
+  return out;
+}
+
 async function fetchJsonWithRetry(url, tries, label) {
   for (let attempt = 1; attempt <= tries; attempt += 1) {
     try {
@@ -289,14 +422,12 @@ async function fetchJsonWithRetry(url, tries, label) {
 
       if (res.status === 429) {
         consecutive429 += 1;
-        const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt * attempt) + jitter(800);
+        const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt * attempt) + jitter(900);
         console.log(`[429] ${label} retry ${attempt}/${tries} in ${waitMs}ms -> ${url}`);
         await sleep(waitMs);
 
         if (consecutive429 >= RATE_LIMIT_STREAK_TRIGGER) {
-          console.log(
-            `[rate-limit] cooldown ${RATE_LIMIT_COOLDOWN_MS}ms after streak=${consecutive429}`
-          );
+          console.log(`[rate-limit] cooldown ${RATE_LIMIT_COOLDOWN_MS}ms after streak=${consecutive429}`);
           consecutive429 = 0;
           await sleep(RATE_LIMIT_COOLDOWN_MS);
         }
@@ -304,21 +435,21 @@ async function fetchJsonWithRetry(url, tries, label) {
       }
 
       if (res.status >= 500 && attempt < tries) {
-        const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(500);
+        const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(600);
         console.log(`[${res.status}] ${label} retry ${attempt}/${tries} in ${waitMs}ms`);
         await sleep(waitMs);
         continue;
       }
 
       const text = await res.text().catch(() => "");
-      console.log(`[${res.status}] ${label} give up -> ${url} ${text.slice(0, 180)}`);
+      console.log(`[${res.status}] ${label} give up -> ${url} ${text.slice(0, 160)}`);
       return null;
     } catch (err) {
       if (attempt >= tries) {
         console.log(`[error] ${label} give up -> ${url} :: ${err.message}`);
         return null;
       }
-      const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(500);
+      const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(600);
       console.log(`[error] ${label} retry ${attempt}/${tries} in ${waitMs}ms -> ${err.message}`);
       await sleep(waitMs);
     }
@@ -485,7 +616,6 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_id INTEGER;`);
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_name TEXT;`);
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
-
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS subcategory TEXT DEFAULT 'misc';`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'bundle';`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
@@ -675,8 +805,24 @@ async function upsertBundleLink(link) {
   );
 }
 
-function buildCrawlPlan() {
+function buildTabTerms(tabKey, runSeed) {
+  const core = rotatedSlice(TAB_CORE[tabKey] || [], MAX_CORE_TERMS_PER_TAB, `${runSeed}:${tabKey}:core`);
+  const boost = rotatedSlice(TAB_BOOST[tabKey] || [], MAX_BOOST_TERMS_PER_TAB, `${runSeed}:${tabKey}:boost`);
+  const longTail = rotatedSlice(TAB_LONGTAIL[tabKey] || [], MAX_LONGTAIL_TERMS_PER_TAB, `${runSeed}:${tabKey}:longtail`);
+  return [...new Set([...core, ...boost, ...longTail])];
+}
+
+function buildCrawlPlan(runSeed) {
   const plan = [{ key: "all", passes: [{ keyword: "", intent: "all", category: CLOTHING_CATEGORY }] }];
+
+  const rotatedGlobal = rotatedSlice(
+    GLOBAL_STYLE_TERMS,
+    MAX_GLOBAL_TERMS_PER_RUN,
+    `${runSeed}:global:style`
+  );
+  for (const kw of rotatedGlobal) {
+    plan[0].passes.push({ keyword: kw, intent: "global_style", category: CLOTHING_CATEGORY });
+  }
 
   const orderedKeys = [
     "classic_shirts",
@@ -692,8 +838,8 @@ function buildCrawlPlan() {
   ];
 
   for (const key of orderedKeys) {
-    const words = SUBTAB_KEYWORDS[key] || [];
-    const passes = words.map((keyword) => ({
+    const terms = buildTabTerms(key, runSeed);
+    const passes = terms.map((keyword) => ({
       keyword,
       intent: "discovery",
       category: CLOTHING_CATEGORY,
@@ -708,7 +854,7 @@ async function crawlItemPass(tabKey, passConfig) {
   let cursor = null;
   let pages = 0;
   let upserts = 0;
-  let lookedAt = 0;
+  let seen = 0;
 
   while (pages < MAX_PAGES_PER_PASS) {
     const url = buildSearchUrl({
@@ -738,27 +884,31 @@ async function crawlItemPass(tabKey, passConfig) {
       upserts += 1;
     }
 
-    lookedAt += items.length;
+    seen += items.length;
     pages += 1;
     cursor = json.nextPageCursor || null;
     if (!cursor) break;
 
-    await sleep(DELAY_MS + jitter(800));
+    await sleep(DELAY_MS + jitter(700));
   }
 
-  console.log(
-    `[crawl] ${tabKey} keyword="${passConfig.keyword}" pages=${pages} seen=${lookedAt} upserts=${upserts}`
-  );
+  console.log(`[crawl] ${tabKey} keyword="${passConfig.keyword}" pages=${pages} seen=${seen} upserts=${upserts}`);
 }
 
-async function crawlShoeBundles() {
+async function crawlShoeBundles(runSeed) {
   const seenBundles = new Set();
   let discovered = 0;
   let acceptedPairs = 0;
   let linkedAssets = 0;
 
+  const rotatedShoeKeywords = rotatedSlice(
+    SHOE_BUNDLE_KEYWORDS,
+    Math.max(10, Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 20)),
+    `${runSeed}:shoes:bundles`
+  );
+
   for (const category of [CLOTHING_CATEGORY, ...ALT_DISCOVERY_CATEGORIES]) {
-    for (const keyword of SHOE_BUNDLE_KEYWORDS) {
+    for (const keyword of rotatedShoeKeywords) {
       let cursor = null;
       let pages = 0;
 
@@ -887,9 +1037,7 @@ async function crawlShoeBundles() {
     }
   }
 
-  console.log(
-    `[crawl-bundles] discovered=${discovered} acceptedPairs=${acceptedPairs} linkedAssets=${linkedAssets}`
-  );
+  console.log(`[crawl-bundles] discovered=${discovered} acceptedPairs=${acceptedPairs} linkedAssets=${linkedAssets}`);
 }
 
 async function pruneInvalidShoeBundles() {
@@ -929,16 +1077,19 @@ async function main() {
 
     await ensureSchema();
 
-    const plan = buildCrawlPlan();
+    const runSeedBase = Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS));
+    const runSeed = String(runSeedBase);
+
+    const plan = buildCrawlPlan(runSeed);
 
     for (const tab of plan) {
       for (const pass of tab.passes) {
         await crawlItemPass(tab.key, pass);
-        await sleep(DELAY_MS + jitter(600));
+        await sleep(DELAY_MS + jitter(500));
       }
     }
 
-    await crawlShoeBundles();
+    await crawlShoeBundles(runSeed);
     await pruneInvalidShoeBundles();
 
     console.log("Crawl complete");
