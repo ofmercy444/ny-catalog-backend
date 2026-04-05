@@ -16,23 +16,6 @@ const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 2200);
 const INCLUDE_NOT_FOR_SALE =
   String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-const LAYERED_TABS = new Set([
-  "shirts",
-  "jackets",
-  "sweaters",
-  "t_shirts",
-  "pants",
-  "shorts",
-  "dresses_skirts",
-  "shoes",
-]);
-
-const CLASSIC_TABS = new Set([
-  "classic_shirts",
-  "classic_pants",
-  "classic_t_shirts",
-]);
-
 const CRAWL_PLAN = [
   { key: "all", passes: [{ keyword: "", intent: "all" }] },
 
@@ -40,45 +23,20 @@ const CRAWL_PLAN = [
   { key: "classic_pants", passes: [{ keyword: "classic pants template", intent: "classic" }] },
   { key: "classic_t_shirts", passes: [{ keyword: "classic t shirt", intent: "classic" }] },
 
-  { key: "shirts", passes: [
-    { keyword: "layered shirt", intent: "layered" },
-    { keyword: "shirt", intent: "fallback" },
-  ]},
-  { key: "jackets", passes: [
-    { keyword: "layered jacket", intent: "layered" },
-    { keyword: "jacket", intent: "fallback" },
-  ]},
-  { key: "sweaters", passes: [
-    { keyword: "layered sweater", intent: "layered" },
-    { keyword: "sweater", intent: "fallback" },
-  ]},
-  { key: "t_shirts", passes: [
-    { keyword: "layered t shirt", intent: "layered" },
-    { keyword: "t shirt", intent: "fallback" },
-  ]},
-  { key: "pants", passes: [
-    { keyword: "layered pants", intent: "layered" },
-    { keyword: "pants", intent: "fallback" },
-  ]},
-  { key: "shorts", passes: [
-    { keyword: "layered shorts", intent: "layered" },
-    { keyword: "shorts", intent: "fallback" },
-  ]},
-  { key: "dresses_skirts", passes: [
-    { keyword: "layered dress skirt", intent: "layered" },
-    { keyword: "dress skirt", intent: "fallback" },
-  ]},
-  { key: "shoes", passes: [
-    { keyword: "layered shoes", intent: "layered" },
-    { keyword: "shoes", intent: "fallback" },
-  ]},
+  { key: "shirts", passes: [{ keyword: "layered shirt", intent: "layered" }, { keyword: "shirt", intent: "fallback" }] },
+  { key: "jackets", passes: [{ keyword: "layered jacket", intent: "layered" }, { keyword: "jacket", intent: "fallback" }] },
+  { key: "sweaters", passes: [{ keyword: "layered sweater", intent: "layered" }, { keyword: "sweater", intent: "fallback" }] },
+  { key: "t_shirts", passes: [{ keyword: "layered t shirt", intent: "layered" }, { keyword: "t shirt", intent: "fallback" }] },
+  { key: "pants", passes: [{ keyword: "layered pants", intent: "layered" }, { keyword: "pants", intent: "fallback" }] },
+  { key: "shorts", passes: [{ keyword: "layered shorts", intent: "layered" }, { keyword: "shorts", intent: "fallback" }] },
+  { key: "dresses_skirts", passes: [{ keyword: "layered dress skirt", intent: "layered" }, { keyword: "dress skirt", intent: "fallback" }] },
+  { key: "shoes", passes: [{ keyword: "layered shoes", intent: "layered" }, { keyword: "shoes", intent: "fallback" }] },
 ];
 
-const CLASSIC_TEXT_RE =
-  /(classic shirt|classic pants|classic t-shirt|classic t shirt|template|2d clothing|2d)/i;
+const CLASSIC_NAME_RE =
+  /(classic shirt|classic pants|classic t-shirt|classic t shirt|template|2d)/i;
 
-// STRICT layered signals (ugc alone does NOT qualify)
-const STRONG_LAYERED_RE =
+const LAYERED_NAME_TYPE_RE =
   /(layered|shirt accessory|pants accessory|jacket accessory|sweater accessory|shorts accessory|dress skirt accessory|shoe accessory|left shoe|right shoe|3d|mesh)/i;
 
 function sleep(ms) {
@@ -91,7 +49,6 @@ function buildUrl({ keyword, cursor }) {
   url.searchParams.set("Limit", String(PAGE_LIMIT));
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
-
   if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
   if (cursor) url.searchParams.set("Cursor", cursor);
   return url.toString();
@@ -187,36 +144,21 @@ function normalizeItem(raw) {
     category: "clothing",
     thumbnail_url: raw.thumbnailUrl || "",
     is_offsale:
-      raw.itemRestrictions?.includes?.("Offsale") ||
-      raw.isOffsale === true ||
-      false,
+      raw.itemRestrictions?.includes?.("Offsale") || raw.isOffsale === true || false,
     is_limited:
-      raw.itemRestrictions?.includes?.("Limited") ||
-      raw.isLimited === true ||
-      false,
+      raw.itemRestrictions?.includes?.("Limited") || raw.isLimited === true || false,
     is_limited_unique:
-      raw.itemRestrictions?.includes?.("LimitedUnique") ||
-      raw.isLimitedUnique === true ||
-      false,
+      raw.itemRestrictions?.includes?.("LimitedUnique") || raw.isLimitedUnique === true || false,
     price_robux: Number.isFinite(raw.price) ? raw.price : null,
   };
 }
 
-function computeLayeredFlag(subtabKey, passIntent, item) {
-  if (CLASSIC_TABS.has(subtabKey)) return false;
-  if (!LAYERED_TABS.has(subtabKey)) return false;
+function computeLayeredFlag(item) {
+  // IMPORTANT: use name + item_type only (description is noisy/spammy)
+  const nameType = `${item.name || ""} ${item.item_type || ""}`.toLowerCase();
 
-  const text = `${item.name || ""} ${item.description || ""}`.toLowerCase();
-
-  // Never layered if clearly classic/2D template-ish
-  if (CLASSIC_TEXT_RE.test(text)) return false;
-
-  // Layered pass must include strong layered signals
-  if (passIntent === "layered") {
-    return STRONG_LAYERED_RE.test(text);
-  }
-
-  // Fallback pass is non-layered
+  if (CLASSIC_NAME_RE.test(nameType)) return false;
+  if (LAYERED_NAME_TYPE_RE.test(nameType)) return true;
   return false;
 }
 
@@ -227,9 +169,7 @@ async function upsertItem(item) {
       asset_id, name, description, creator_name, creator_id, creator_type,
       item_type, category, thumbnail_url, is_offsale, is_limited, is_limited_unique, price_robux, updated_at
     )
-    VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW()
-    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
     ON CONFLICT (asset_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
@@ -276,7 +216,7 @@ async function upsertSubtabMapping(assetId, subtabKey, isLayered) {
   );
 }
 
-async function rebuildSubtabMappings(subtabKey) {
+async function rebuildSubtab(subtabKey) {
   await pool.query(`DELETE FROM public.catalog_item_subtabs WHERE subtab_key = $1`, [subtabKey]);
 }
 
@@ -297,22 +237,21 @@ async function crawlPass(subtabKey, passConfig) {
 
       await upsertItem(item);
 
-      const isLayered = computeLayeredFlag(subtabKey, passConfig.intent, item);
-      if (isLayered) layeredMapped += 1;
+      const layered = computeLayeredFlag(item);
+      if (layered) layeredMapped += 1;
 
-      await upsertSubtabMapping(item.asset_id, subtabKey, isLayered);
+      await upsertSubtabMapping(item.asset_id, subtabKey, layered);
       upserts += 1;
     }
 
     pages += 1;
     cursor = json.nextPageCursor || null;
     if (!cursor) break;
-
     await sleep(DELAY_MS);
   }
 
   console.log(
-    `[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | intent=${passConfig.intent} | pages=${pages}, upserts=${upserts}, layeredMapped=${layeredMapped}`
+    `[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | pages=${pages}, upserts=${upserts}, layeredMapped=${layeredMapped}`
   );
 }
 
@@ -324,8 +263,7 @@ async function main() {
     await ensureSchema();
 
     for (const tab of CRAWL_PLAN) {
-      await rebuildSubtabMappings(tab.key);
-
+      await rebuildSubtab(tab.key);
       for (const pass of tab.passes) {
         await crawlPass(tab.key, pass);
         await sleep(DELAY_MS);

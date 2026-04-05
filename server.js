@@ -44,23 +44,6 @@ const SUBTAB_ALIASES = {
   classic_t_shirts: "classic_t_shirts",
 };
 
-const CLASSIC_FIRST_TABS = new Set([
-  "classic_shirts",
-  "classic_pants",
-  "classic_t_shirts",
-]);
-
-const LAYERED_FIRST_TABS = new Set([
-  "shirts",
-  "jackets",
-  "sweaters",
-  "t_shirts",
-  "pants",
-  "shorts",
-  "dresses_skirts",
-  "shoes",
-]);
-
 function normalizeTabKey(raw) {
   const cleaned = String(raw || "all")
     .toLowerCase()
@@ -127,7 +110,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v9:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v10:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -142,8 +125,8 @@ app.get("/catalog/search", async (req, reply) => {
     }
 
     let sql;
-
     if (subtab === "all") {
+      // global layered score per asset (bool_or across all mapped subtabs)
       params.push(limit, offset);
       sql = `
         SELECT
@@ -163,7 +146,7 @@ app.get("/catalog/search", async (req, reply) => {
           i.is_limited_unique,
           i.price_robux,
           i.updated_at,
-          false AS is_layered,
+          COALESCE(stg.is_layered, false) AS is_layered,
           CASE
             WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
               THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
@@ -172,22 +155,19 @@ app.get("/catalog/search", async (req, reply) => {
             ELSE 'rbxasset://textures/ui/GuiImagePlaceholder.png'
           END AS creator_avatar_url
         FROM public.catalog_items i
+        LEFT JOIN LATERAL (
+          SELECT bool_or(s.is_layered) AS is_layered
+          FROM public.catalog_item_subtabs s
+          WHERE s.asset_id = i.asset_id
+        ) stg ON true
         ${where}
-        ORDER BY i.updated_at DESC, i.asset_id DESC
+        ORDER BY COALESCE(stg.is_layered, false) DESC, i.updated_at DESC, i.asset_id DESC
         LIMIT $${params.length - 1}
         OFFSET $${params.length};
       `;
     } else {
       where += ` AND st.subtab_key = $${params.length + 1}`;
       params.push(subtab);
-
-      let orderSql = "i.updated_at DESC, i.asset_id DESC";
-      if (LAYERED_FIRST_TABS.has(subtab)) {
-        orderSql = "st.is_layered DESC, i.updated_at DESC, i.asset_id DESC";
-      } else if (CLASSIC_FIRST_TABS.has(subtab)) {
-        orderSql = "st.is_layered ASC, i.updated_at DESC, i.asset_id DESC";
-      }
-
       params.push(limit, offset);
 
       sql = `
@@ -219,7 +199,7 @@ app.get("/catalog/search", async (req, reply) => {
         FROM public.catalog_items i
         JOIN public.catalog_item_subtabs st ON st.asset_id = i.asset_id
         ${where}
-        ORDER BY ${orderSql}
+        ORDER BY st.is_layered DESC, i.updated_at DESC, i.asset_id DESC
         LIMIT $${params.length - 1}
         OFFSET $${params.length};
       `;
