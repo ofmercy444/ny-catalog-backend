@@ -127,7 +127,8 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v4:${category}:${subtab}:${q}:${limit}:${offset}`;
+    // bump namespace so stale cached ordering cannot survive
+    const cacheKey = `search:v8:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -136,66 +137,93 @@ app.get("/catalog/search", async (req, reply) => {
     const params = [category];
     let where = "WHERE lower(i.category) = $1";
 
-    if (subtab !== "all") {
-      where += ` AND st.subtab_key = $${params.length + 1}`;
-      params.push(subtab);
-    }
-
     if (q.length > 0) {
       where += ` AND lower(coalesce(i.name,'')) LIKE $${params.length + 1}`;
       params.push(`%${q}%`);
     }
 
-    let orderSql = "i.updated_at DESC, i.asset_id DESC";
-    if (subtab !== "all") {
+    let sql;
+    if (subtab === "all") {
+      // all tab should NOT apply layered-first rule
+      params.push(limit, offset);
+      sql = `
+        SELECT
+          i.asset_id,
+          i.name,
+          i.category,
+          i.item_type,
+          i.creator_id,
+          i.creator_name,
+          i.creator_type,
+          i.description,
+          'rbxthumb://type=Asset&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_url,
+          'rbxthumb://type=BundleThumbnail&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_bundle_url,
+          COALESCE(i.thumbnail_url, '') AS thumbnail_raw_url,
+          i.is_offsale,
+          i.is_limited,
+          i.is_limited_unique,
+          i.price_robux,
+          i.updated_at,
+          false AS is_layered,
+          CASE
+            WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
+              THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
+            WHEN i.creator_id IS NOT NULL
+              THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
+            ELSE 'rbxasset://textures/ui/GuiImagePlaceholder.png'
+          END AS creator_avatar_url
+        FROM public.catalog_items i
+        ${where}
+        ORDER BY i.updated_at DESC, i.asset_id DESC
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length};
+      `;
+    } else {
+      where += ` AND st.subtab_key = $${params.length + 1}`;
+      params.push(subtab);
+
+      let orderSql = "i.updated_at DESC, i.asset_id DESC";
       if (LAYERED_FIRST_TABS.has(subtab)) {
         orderSql = "st.is_layered DESC, i.updated_at DESC, i.asset_id DESC";
       } else if (CLASSIC_FIRST_TABS.has(subtab)) {
         orderSql = "st.is_layered ASC, i.updated_at DESC, i.asset_id DESC";
       }
+
+      params.push(limit, offset);
+      sql = `
+        SELECT
+          i.asset_id,
+          i.name,
+          i.category,
+          i.item_type,
+          i.creator_id,
+          i.creator_name,
+          i.creator_type,
+          i.description,
+          'rbxthumb://type=Asset&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_url,
+          'rbxthumb://type=BundleThumbnail&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_bundle_url,
+          COALESCE(i.thumbnail_url, '') AS thumbnail_raw_url,
+          i.is_offsale,
+          i.is_limited,
+          i.is_limited_unique,
+          i.price_robux,
+          i.updated_at,
+          st.is_layered,
+          CASE
+            WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
+              THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
+            WHEN i.creator_id IS NOT NULL
+              THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
+            ELSE 'rbxasset://textures/ui/GuiImagePlaceholder.png'
+          END AS creator_avatar_url
+        FROM public.catalog_items i
+        JOIN public.catalog_item_subtabs st ON st.asset_id = i.asset_id
+        ${where}
+        ORDER BY ${orderSql}
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length};
+      `;
     }
-
-    params.push(limit, offset);
-
-    const sql = `
-      SELECT
-        i.asset_id,
-        i.name,
-        i.category,
-        i.item_type,
-        i.creator_id,
-        i.creator_name,
-        i.creator_type,
-        i.description,
-
-        -- stable generated thumbs
-        'rbxthumb://type=Asset&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_url,
-        'rbxthumb://type=BundleThumbnail&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_bundle_url,
-        COALESCE(i.thumbnail_url, '') AS thumbnail_raw_url,
-
-        i.is_offsale,
-        i.is_limited,
-        i.is_limited_unique,
-        i.price_robux,
-        i.updated_at,
-        COALESCE(st.is_layered, false) AS is_layered,
-
-        CASE
-          WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
-            THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
-          WHEN i.creator_id IS NOT NULL
-            THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
-          ELSE 'rbxasset://textures/ui/GuiImagePlaceholder.png'
-        END AS creator_avatar_url
-      FROM public.catalog_items i
-      ${subtab === "all"
-        ? "LEFT JOIN public.catalog_item_subtabs st ON st.asset_id = i.asset_id"
-        : "JOIN public.catalog_item_subtabs st ON st.asset_id = i.asset_id"}
-      ${where}
-      ORDER BY ${orderSql}
-      LIMIT $${params.length - 1}
-      OFFSET $${params.length};
-    `;
 
     const { rows } = await pool.query(sql, params);
 
