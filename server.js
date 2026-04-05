@@ -258,7 +258,6 @@ async function ensureSchema() {
     );
   `);
 
-  // Compatibility for older existing tables.
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS subcategory TEXT DEFAULT 'misc';`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'bundle';`);
@@ -275,6 +274,7 @@ async function ensureSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_name_lower ON public.catalog_bundles((lower(name)));`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_creator_name_lower ON public.catalog_bundles((lower(creator_name)));`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_bundle_id ON public.bundle_asset_links(bundle_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_asset_id ON public.bundle_asset_links(asset_id);`);
 }
 
 let schemaReady = false;
@@ -314,19 +314,7 @@ app.get("/catalog/search", async (req, reply) => {
     if (spec.mode === "shoes_bundle_parents") {
       const sql = `
         SELECT
-          b.bundle_id,
-          b.name,
-          b.description,
-          b.creator_name,
-          b.creator_id,
-          b.creator_type,
-          b.category,
-          b.subcategory,
-          b.item_type,
-          b.thumbnail_url,
-          b.is_offsale,
-          b.price_robux,
-          b.updated_at,
+          b.*,
           CASE
             WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
               THEN 'rbxthumb://type=GroupIcon&id=' || b.creator_id::text || '&w=150&h=150'
@@ -389,9 +377,12 @@ app.get("/catalog/search", async (req, reply) => {
             i.price_robux,
             i.updated_at,
             false AS is_bundle_parent,
+            'asset'::text AS detail_kind,
+            NULL::text AS role,
             CASE
               WHEN i.asset_type_id = ANY($6::int[]) THEN 0
-              ELSE 1
+              WHEN i.asset_type_id = ANY($7::int[]) THEN 2
+              ELSE 3
             END AS sort_bucket,
             CASE
               WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
@@ -427,13 +418,15 @@ app.get("/catalog/search", async (req, reply) => {
             b.creator_type,
             b.description,
             b.thumbnail_url,
-            COALESCE(b.is_offsale, false) AS is_offsale,
+            b.is_offsale,
             false AS is_limited,
             false AS is_limited_unique,
             b.price_robux,
             b.updated_at,
             true AS is_bundle_parent,
-            0 AS sort_bucket,
+            'bundle'::text AS detail_kind,
+            NULL::text AS role,
+            1 AS sort_bucket,
             CASE
               WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
                 THEN 'rbxthumb://type=GroupIcon&id=' || b.creator_id::text || '&w=150&h=150'
