@@ -63,16 +63,6 @@ function normalizeTabKey(raw) {
   return SUBTAB_ALIASES[cleaned] || SUBTAB_ALIASES[compact] || "all";
 }
 
-function normalizeBundleBaseTitle(name) {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/\((left|right)\)/g, "")
-    .replace(/\b(left|right)\b/g, "")
-    .replace(/[|:–—-]+\s*(left|right)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function getSubtabSpec(subtab) {
   if (subtab === "classic_shirts") return { mode: "classic", allowedTypes: [CLASSIC_SHIRT_TYPE] };
   if (subtab === "classic_pants") return { mode: "classic", allowedTypes: [CLASSIC_PANTS_TYPE] };
@@ -135,9 +125,7 @@ function getSubtabSpec(subtab) {
     };
   }
 
-  if (subtab === "shoes") {
-    return { mode: "shoes_bundle_parents" };
-  }
+  if (subtab === "shoes") return { mode: "shoes_bundle_parents" };
 
   return {
     mode: "all_strict",
@@ -219,15 +207,12 @@ async function ensureSchemaOnce() {
 }
 
 function buildCreatorAvatar(creatorType, creatorId) {
-  const type = String(creatorType || "").toLowerCase();
+  const t = String(creatorType || "").toLowerCase();
   const id = Number(creatorId);
-  if (!Number.isFinite(id) || id <= 0) {
-    return "rbxasset://textures/ui/GuiImagePlaceholder.png";
-  }
-  if (type === "group") {
-    return `rbxthumb://type=GroupIcon&id=${id}&w=150&h=150`;
-  }
-  return `rbxthumb://type=AvatarHeadShot&id=${id}&w=150&h=150`;
+  if (!Number.isFinite(id) || id <= 0) return "rbxasset://textures/ui/GuiImagePlaceholder.png";
+  return t === "group"
+    ? `rbxthumb://type=GroupIcon&id=${id}&w=150&h=150`
+    : `rbxthumb://type=AvatarHeadShot&id=${id}&w=150&h=150`;
 }
 
 function mapItemRow(row) {
@@ -235,35 +220,30 @@ function mapItemRow(row) {
     asset_id: row.asset_id,
     detail_kind: "asset",
     is_bundle_parent: false,
-
     name: row.name,
     category: row.category,
     item_type: row.item_type,
     asset_type_id: row.asset_type_id,
     asset_type_name: row.asset_type_name,
-
     creator_id: row.creator_id,
     creator_name: row.creator_name,
     creator_type: row.creator_type,
     description: row.description,
-
     thumbnail_url: `rbxthumb://type=Asset&id=${row.asset_id}&w=420&h=420`,
     thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${row.asset_id}&w=420&h=420`,
     thumbnail_raw_url: row.thumbnail_url || "",
-
     is_offsale: row.is_offsale,
     is_limited: row.is_limited,
     is_limited_unique: row.is_limited_unique,
     price_robux: row.price_robux,
     updated_at: row.updated_at,
-
     is_layered: LAYERED_TYPES.includes(Number(row.asset_type_id)),
     creator_avatar_url: buildCreatorAvatar(row.creator_type, row.creator_id),
   };
 }
 
 function mapBundleRow(row) {
-  const bundleThumb =
+  const thumb =
     row.thumbnail_url && row.thumbnail_url !== ""
       ? row.thumbnail_url
       : `rbxthumb://type=BundleThumbnail&id=${row.bundle_id}&w=420&h=420`;
@@ -273,28 +253,23 @@ function mapBundleRow(row) {
     bundle_id: row.bundle_id,
     detail_kind: "bundle",
     is_bundle_parent: true,
-
     name: row.name,
     category: row.category || "clothing",
     item_type: row.bundle_type || "Bundle",
     asset_type_id: null,
     asset_type_name: "Bundle",
-
     creator_id: row.creator_id,
     creator_name: row.creator_name,
     creator_type: row.creator_type,
     description: row.description,
-
-    thumbnail_url: bundleThumb,
-    thumbnail_bundle_url: bundleThumb,
+    thumbnail_url: thumb,
+    thumbnail_bundle_url: thumb,
     thumbnail_raw_url: row.thumbnail_url || "",
-
     is_offsale: false,
     is_limited: false,
     is_limited_unique: false,
     price_robux: null,
     updated_at: row.updated_at,
-
     is_layered: false,
     creator_avatar_url: buildCreatorAvatar(row.creator_type, row.creator_id),
   };
@@ -308,13 +283,12 @@ function mapBundleChildRow(r) {
       ? "left_shoe"
       : Number(finalType) === SHOE_RIGHT_TYPE
       ? "right_shoe"
-      : null);
+      : nil);
 
   return {
     asset_id: r.asset_id,
     detail_kind: "asset",
     is_bundle_parent: false,
-
     name: r.name || `Asset ${r.asset_id}`,
     item_type: r.item_type || "",
     description: r.description || "",
@@ -323,80 +297,11 @@ function mapBundleChildRow(r) {
     creator_type: r.creator_type || "",
     asset_type_id: finalType,
     asset_type_name: r.asset_type_name || "",
-
     thumbnail_url: `rbxthumb://type=Asset&id=${r.asset_id}&w=150&h=150`,
     thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${r.asset_id}&w=150&h=150`,
     thumbnail_raw_url: r.thumbnail_url || "",
     role,
     creator_avatar_url: buildCreatorAvatar(r.creator_type, r.creator_id),
-  };
-}
-
-async function fetchBundleChildren(bundleId) {
-  const res = await pool.query(
-    `
-    SELECT
-      l.bundle_id, l.asset_id, l.role, l.asset_type_id AS link_asset_type_id, l.sort_order,
-      i.name, i.description, i.creator_name, i.creator_id, i.creator_type, i.item_type,
-      i.asset_type_id, i.asset_type_name, i.thumbnail_url
-    FROM public.bundle_asset_links l
-    LEFT JOIN public.catalog_items i ON i.asset_id = l.asset_id
-    WHERE l.bundle_id = $1
-    ORDER BY l.sort_order ASC, l.asset_id ASC
-    `,
-    [bundleId]
-  );
-  return res.rows.map(mapBundleChildRow);
-}
-
-async function patchMissingShoeSide(bundleItem, bundleName, creatorId, neededType) {
-  const base = normalizeBundleBaseTitle(bundleName);
-  if (!base) return bundleItem;
-
-  const params = [neededType];
-  let where = `WHERE asset_type_id = $1`;
-
-  if (creatorId != null) {
-    params.push(creatorId);
-    where += ` AND creator_id = $${params.length}`;
-  }
-
-  params.push(120);
-
-  const res = await pool.query(
-    `
-    SELECT asset_id, name, creator_name, creator_id, creator_type, item_type, asset_type_id, asset_type_name, thumbnail_url
-    FROM public.catalog_items
-    ${where}
-    ORDER BY updated_at DESC, asset_id DESC
-    LIMIT $${params.length}
-    `,
-    params
-  );
-
-  const exact = res.rows.find((r) => normalizeBundleBaseTitle(r.name) === base);
-  const pick = exact || res.rows[0] || null;
-  if (!pick) return bundleItem;
-
-  return {
-    asset_id: pick.asset_id,
-    detail_kind: "asset",
-    is_bundle_parent: false,
-
-    name: pick.name || `Asset ${pick.asset_id}`,
-    item_type: pick.item_type || "",
-    description: "",
-    creator_name: pick.creator_name || "",
-    creator_id: pick.creator_id,
-    creator_type: pick.creator_type || "",
-    asset_type_id: pick.asset_type_id,
-    asset_type_name: pick.asset_type_name || "",
-
-    thumbnail_url: `rbxthumb://type=Asset&id=${pick.asset_id}&w=150&h=150`,
-    thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${pick.asset_id}&w=150&h=150`,
-    thumbnail_raw_url: pick.thumbnail_url || "",
-    role: neededType === SHOE_LEFT_TYPE ? "left_shoe" : "right_shoe",
-    creator_avatar_url: buildCreatorAvatar(pick.creator_type, pick.creator_id),
   };
 }
 
@@ -484,7 +389,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v22:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v23:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -494,10 +399,21 @@ app.get("/catalog/search", async (req, reply) => {
 
     if (spec.mode === "shoes_bundle_parents") {
       const params = [category];
-      let where = "WHERE lower(category) = $1 AND lower(subcategory) = 'shoes'";
+      let where = `
+        WHERE lower(b.category) = $1
+          AND lower(b.subcategory) = 'shoes'
+          AND EXISTS (
+            SELECT 1 FROM public.bundle_asset_links l
+            WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_LEFT_TYPE}
+          )
+          AND EXISTS (
+            SELECT 1 FROM public.bundle_asset_links l
+            WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_RIGHT_TYPE}
+          )
+      `;
 
       if (q.length > 0) {
-        where += ` AND lower(coalesce(name,'')) LIKE $${params.length + 1}`;
+        where += ` AND lower(coalesce(b.name,'')) LIKE $${params.length + 1}`;
         params.push(`%${q}%`);
       }
 
@@ -506,11 +422,11 @@ app.get("/catalog/search", async (req, reply) => {
       const res = await pool.query(
         `
         SELECT
-          bundle_id, name, description, creator_name, creator_id, creator_type,
-          bundle_type, category, subcategory, thumbnail_url, updated_at
-        FROM public.catalog_bundles
+          b.bundle_id, b.name, b.description, b.creator_name, b.creator_id, b.creator_type,
+          b.bundle_type, b.category, b.subcategory, b.thumbnail_url, b.updated_at
+        FROM public.catalog_bundles b
         ${where}
-        ORDER BY updated_at DESC, bundle_id DESC
+        ORDER BY b.updated_at DESC, b.bundle_id DESC
         LIMIT $${params.length - 1}
         OFFSET $${params.length}
         `,
@@ -586,6 +502,7 @@ app.get("/catalog/item/:id", async (req, reply) => {
           bundle_type, category, subcategory, thumbnail_url, updated_at
         FROM public.catalog_bundles
         WHERE bundle_id = $1
+          AND lower(subcategory) = 'shoes'
         LIMIT 1
         `,
         [id]
@@ -595,32 +512,33 @@ app.get("/catalog/item/:id", async (req, reply) => {
         return reply.code(404).send({ error: "bundle_not_found" });
       }
 
-      const bundleRow = bundleRes.rows[0];
-      let bundleItems = await fetchBundleChildren(id);
+      const linksRes = await pool.query(
+        `
+        SELECT
+          l.bundle_id, l.asset_id, l.role, l.asset_type_id AS link_asset_type_id, l.sort_order,
+          i.name, i.description, i.creator_name, i.creator_id, i.creator_type, i.item_type,
+          i.asset_type_id, i.asset_type_name, i.thumbnail_url
+        FROM public.bundle_asset_links l
+        LEFT JOIN public.catalog_items i ON i.asset_id = l.asset_id
+        WHERE l.bundle_id = $1
+          AND l.asset_type_id IN (${SHOE_LEFT_TYPE}, ${SHOE_RIGHT_TYPE})
+        ORDER BY l.sort_order ASC, l.asset_id ASC
+        `,
+        [id]
+      );
 
-      let left = bundleItems.find((x) => Number(x.asset_type_id) === SHOE_LEFT_TYPE);
-      let right = bundleItems.find((x) => Number(x.asset_type_id) === SHOE_RIGHT_TYPE);
+      const mapped = linksRes.rows.map(mapBundleChildRow);
 
-      if (!left) {
-        const patched = await patchMissingShoeSide(null, bundleRow.name, bundleRow.creator_id, SHOE_LEFT_TYPE);
-        if (patched) bundleItems.push(patched);
-      }
-      if (!right) {
-        const patched = await patchMissingShoeSide(null, bundleRow.name, bundleRow.creator_id, SHOE_RIGHT_TYPE);
-        if (patched) bundleItems.push(patched);
-      }
+      const left = mapped.find((x) => Number(x.asset_type_id) === SHOE_LEFT_TYPE);
+      const right = mapped.find((x) => Number(x.asset_type_id) === SHOE_RIGHT_TYPE);
 
-      // Stable order: left first, right second, then rest
-      bundleItems.sort((a, b) => {
-        const ra = a.role === "left_shoe" ? 0 : a.role === "right_shoe" ? 1 : 2;
-        const rb = b.role === "left_shoe" ? 0 : b.role === "right_shoe" ? 1 : 2;
-        if (ra !== rb) return ra - rb;
-        return Number(a.asset_id) - Number(b.asset_id);
-      });
+      const ordered = [];
+      if (left) ordered.push(left);
+      if (right) ordered.push(right);
 
       return {
-        item: mapBundleRow(bundleRow),
-        bundle_items: bundleItems,
+        item: mapBundleRow(bundleRes.rows[0]),
+        bundle_items: ordered,
         detail_mode: "bundle_parent",
         can_wear: true,
         can_purchase: true,
