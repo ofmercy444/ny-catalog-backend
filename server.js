@@ -41,7 +41,6 @@ const SUBTAB_ALIASES = {
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
-
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -150,7 +149,6 @@ function buildSearchTerms(qRaw) {
     }
   }
 
-  // phrase variants for hyphen/space
   expanded.add(normalized.replace(/\s+/g, "-"));
   expanded.add(normalized.replace(/-/g, " "));
 
@@ -184,23 +182,19 @@ function computeRank(item, terms) {
   const creator = String(item.creator_name || "").toLowerCase();
   let score = 0;
 
-  // Tier 1: exact phrase
   if (name.includes(terms.normalized)) score += 120;
 
-  // Tier 2: all core tokens present (in any order, with singular/plural handling)
   if (terms.coreTokens.length > 0) {
     const allPresent = terms.coreTokens.every((t) => hasAnyForm(name, t));
     if (allPresent) score += 70;
   }
 
-  // Tier 3: partial token overlap
   let hits = 0;
   for (const tok of terms.expandedTokens) {
     if (name.includes(tok)) hits += 1;
   }
   score += Math.min(hits, 8) * 12;
 
-  // creator + numeric boosts
   if (creator && creator.includes(terms.normalized)) score += 25;
   if (terms.qNumeric !== null && Number(item.asset_id) === terms.qNumeric) score += 200;
 
@@ -440,7 +434,7 @@ app.get("/catalog/search", async (req, reply) => {
     const terms = buildSearchTerms(req.query.q || "");
     const hasQuery = terms.normalized.length > 0;
 
-    const cacheKey = `search:v29:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
+    const cacheKey = `search:v30:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -448,7 +442,7 @@ app.get("/catalog/search", async (req, reply) => {
 
     const spec = getSubtabSpec(subtab);
 
-    // For query mode, fetch wider then rank client-side.
+    // Query mode fetches wider and ranks in memory.
     const widenedLimit = hasQuery
       ? Math.min(700, Math.max(limit * 10, offset + limit + 120))
       : limit;
@@ -715,7 +709,6 @@ app.get("/catalog/search", async (req, reply) => {
       items = rows.map(mapItemRow);
     }
 
-    // Additive ranking tiers only when query exists.
     if (hasQuery) {
       for (const it of items) {
         it._rank = computeRank(it, terms);
@@ -732,11 +725,21 @@ app.get("/catalog/search", async (req, reply) => {
       });
     }
 
-    const paged = items.slice(offset, offset + limit).map(sanitizeItem);
-    const nextOffset = items.length > offset + limit ? offset + limit : null;
+    let responseItems;
+    let nextOffset;
+
+    if (hasQuery) {
+      // Query mode uses in-memory ranked slicing.
+      responseItems = items.slice(offset, offset + limit).map(sanitizeItem);
+      nextOffset = items.length > offset + limit ? offset + limit : null;
+    } else {
+      // Non-query mode is already SQL-paginated: do NOT re-slice by offset.
+      responseItems = items.map(sanitizeItem);
+      nextOffset = items.length === limit ? offset + limit : null;
+    }
 
     const response = {
-      items: paged,
+      items: responseItems,
       nextOffset,
       subtabKey: subtab,
     };
