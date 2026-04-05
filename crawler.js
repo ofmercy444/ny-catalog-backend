@@ -10,43 +10,87 @@ const pool = new Pool({
 });
 
 const CLOTHING_CATEGORY = 3;
-const ALT_DISCOVERY_CATEGORIES = [11, 13];
+const ACCESSORY_DISCOVERY_CATEGORIES = [11, 13];
 
 const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT || 30);
 const MAX_PAGES_PER_PASS = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 1);
 const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 1);
 
-const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 6000);
+const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 7000);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 900);
 const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 6);
-const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 5);
+const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 2);
+const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 4);
 const RETRY_BASE_MS = Number(process.env.CRAWL_RETRY_BASE_MS || 1200);
-const MAX_RETRY_BACKOFF_MS = Number(process.env.CRAWL_MAX_RETRY_BACKOFF_MS || 25000);
+const MAX_RETRY_BACKOFF_MS = Number(process.env.CRAWL_MAX_RETRY_BACKOFF_MS || 12000);
 
-const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 90000);
-const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 4);
+const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 180000);
+const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 2);
 
 const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 80);
 
-const MAX_CORE_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CORE_TERMS_PER_TAB || 8);
-const MAX_BOOST_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_BOOST_TERMS_PER_TAB || 10);
-const MAX_LONGTAIL_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_LONGTAIL_TERMS_PER_TAB || 8);
-const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 18);
+const MAX_CORE_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CORE_TERMS_PER_TAB || 4);
+const MAX_BOOST_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_BOOST_TERMS_PER_TAB || 4);
+const MAX_LONGTAIL_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_LONGTAIL_TERMS_PER_TAB || 3);
+const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 8);
+const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 18);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 6);
+
+const CLASSIC_TSHIRT_TYPE = 2;
+const CLASSIC_SHIRT_TYPE = 11;
+const CLASSIC_PANTS_TYPE = 12;
+
+const HAT_ACCESSORY_TYPE = 8;
+const HAIR_ACCESSORY_TYPE = 41;
+const FACE_ACCESSORY_TYPE = 42;
+const NECK_ACCESSORY_TYPE = 43;
+const SHOULDER_ACCESSORY_TYPE = 44;
+const FRONT_ACCESSORY_TYPE = 45;
+const BACK_ACCESSORY_TYPE = 46;
+const WAIST_ACCESSORY_TYPE = 47;
 
 const SHOE_LEFT_TYPE = 70;
 const SHOE_RIGHT_TYPE = 71;
 
-const memoryAssetTypeCache = new Map();
-let consecutive429 = 0;
+const TYPE_TO_GROUP = {
+  [CLASSIC_TSHIRT_TYPE]: { category: "clothing", subcategory: "classic_t_shirts" },
+  [CLASSIC_SHIRT_TYPE]: { category: "clothing", subcategory: "classic_shirts" },
+  [CLASSIC_PANTS_TYPE]: { category: "clothing", subcategory: "classic_pants" },
+
+  64: { category: "clothing", subcategory: "t_shirts" },
+  65: { category: "clothing", subcategory: "shirts" },
+  66: { category: "clothing", subcategory: "pants" },
+  67: { category: "clothing", subcategory: "jackets" },
+  68: { category: "clothing", subcategory: "sweaters" },
+  69: { category: "clothing", subcategory: "shorts" },
+  70: { category: "clothing", subcategory: "shoes" },
+  71: { category: "clothing", subcategory: "shoes" },
+  72: { category: "clothing", subcategory: "dresses_skirts" },
+
+  [HAT_ACCESSORY_TYPE]: { category: "accessories", subcategory: "hats" },
+  [HAIR_ACCESSORY_TYPE]: { category: "accessories", subcategory: "hair" },
+  [FACE_ACCESSORY_TYPE]: { category: "accessories", subcategory: "faces" },
+  [NECK_ACCESSORY_TYPE]: { category: "accessories", subcategory: "neck" },
+  [SHOULDER_ACCESSORY_TYPE]: { category: "accessories", subcategory: "shoulder" },
+  [FRONT_ACCESSORY_TYPE]: { category: "accessories", subcategory: "front" },
+  [BACK_ACCESSORY_TYPE]: { category: "accessories", subcategory: "back" },
+  [WAIST_ACCESSORY_TYPE]: { category: "accessories", subcategory: "waist" },
+};
 
 const ASSET_TYPE_NAME_TO_ID = {
   tshirt: 2,
   shirt: 11,
   pants: 12,
+  hat: 8,
+  hairaccessory: 41,
+  faceaccessory: 42,
+  neckaccessory: 43,
+  shoulderaccessory: 44,
+  frontaccessory: 45,
+  backaccessory: 46,
+  waistaccessory: 47,
   tshirtaccessory: 64,
   shirtaccessory: 65,
   pantsaccessory: 66,
@@ -63,226 +107,89 @@ const TAB_CORE = {
   classic_pants: ["classic pants", "2d pants", "template pants", "legacy pants", "retro pants"],
   classic_t_shirts: ["classic t-shirt", "classic tee", "2d t shirt", "graphic classic tee", "legacy tee"],
 
-  shirts: [
-    "layered shirt",
-    "shirt",
-    "top",
-    "blouse",
-    "crop top",
-    "baby tee",
-    "tank top",
-    "cami",
-  ],
-  jackets: [
-    "layered jacket",
-    "jacket",
-    "hoodie",
-    "coat",
-    "puffer",
-    "bomber jacket",
-    "varsity jacket",
-    "windbreaker",
-  ],
-  sweaters: [
-    "layered sweater",
-    "sweater",
-    "cardigan",
-    "knit",
-    "pullover",
-    "crewneck",
-    "turtleneck",
-    "chunky knit",
-  ],
-  t_shirts: [
-    "layered t shirt",
-    "t-shirt",
-    "t shirt",
-    "tee",
-    "graphic tee",
-    "vintage tee",
-    "band tee",
-    "logo tee",
-  ],
-  pants: [
-    "layered pants",
-    "pants",
-    "jeans",
-    "cargo pants",
-    "joggers",
-    "sweatpants",
-    "wide leg pants",
-    "baggy jeans",
-  ],
-  shorts: [
-    "layered shorts",
-    "shorts",
-    "denim shorts",
-    "cargo shorts",
-    "athletic shorts",
-    "bike shorts",
-    "running shorts",
-    "bermuda shorts",
-  ],
-  dresses_skirts: [
-    "layered dress",
-    "layered skirt",
-    "dress",
-    "skirt",
-    "mini dress",
-    "midi dress",
-    "maxi dress",
-    "pleated skirt",
-  ],
+  shirts: ["layered shirt", "shirt", "top", "blouse", "crop top", "baby tee", "tank top", "cami"],
+  jackets: ["layered jacket", "jacket", "hoodie", "coat", "puffer", "bomber jacket", "varsity jacket", "windbreaker"],
+  sweaters: ["layered sweater", "sweater", "cardigan", "knit", "pullover", "crewneck", "turtleneck", "chunky knit"],
+  t_shirts: ["layered t shirt", "t-shirt", "t shirt", "tee", "graphic tee", "vintage tee", "band tee", "logo tee"],
+  pants: ["layered pants", "pants", "jeans", "cargo pants", "joggers", "sweatpants", "wide leg pants", "baggy jeans"],
+  shorts: ["layered shorts", "shorts", "denim shorts", "cargo shorts", "athletic shorts", "bike shorts", "running shorts", "bermuda shorts"],
+  dresses_skirts: ["layered dress", "layered skirt", "dress", "skirt", "mini dress", "midi dress", "maxi dress", "pleated skirt"],
+
+  hats: ["hat", "beanie", "cap", "bucket hat", "cowboy hat", "beret", "headband", "tiara"],
+  hair: ["hair", "messy hair", "long hair", "short hair", "curly hair", "straight hair", "wolf cut", "ponytail"],
+  faces: ["face accessory", "mask", "glasses", "sunglasses", "goggles", "balaclava", "mouth mask", "visor"],
+  neck: ["neck accessory", "choker", "necklace", "scarf", "bow tie", "tie", "pendant", "collar"],
+  shoulder: ["shoulder accessory", "shoulder pet", "pauldron", "wings shoulder", "shoulder bag", "plush shoulder"],
+  front: ["front accessory", "crossbody", "chest rig", "front bag", "vest accessory", "body strap"],
+  back: ["back accessory", "backpack", "wings", "cape", "sword back", "quiver", "jetpack", "tail back"],
+  waist: ["waist accessory", "belt", "chain belt", "fanny pack", "skirt waist", "hip bag", "waist chain", "utility belt"],
 };
 
 const TAB_BOOST = {
-  shirts: [
-    "off shoulder top",
-    "corset top",
-    "button up shirt",
-    "halter top",
-    "tube top",
-    "tie-front top",
-    "ruched top",
-    "mock neck top",
-    "longline top",
-    "structured top",
-    "y2k top",
-    "coquette top",
-  ],
-  jackets: [
-    "blazer",
-    "trench coat",
-    "denim jacket",
-    "leather jacket",
-    "shacket",
-    "moto jacket",
-    "biker jacket",
-    "aviator jacket",
-    "quilted jacket",
-    "field jacket",
-    "duster coat",
-    "cape coat",
-  ],
-  sweaters: [
-    "v neck sweater",
-    "cable knit",
-    "cropped sweater",
-    "oversized sweater",
-    "varsity sweater",
-    "fuzzy knit",
-    "mohair sweater",
-    "sweater dress",
-  ],
-  t_shirts: [
-    "baby tee",
-    "oversized tee",
-    "fitted tee",
-    "print tee",
-    "y2k tee",
-    "streetwear tee",
-    "graphic t shirt",
-  ],
-  pants: [
-    "flare pants",
-    "low rise pants",
-    "high waisted pants",
-    "parachute pants",
-    "carpenter pants",
-    "utility pants",
-    "pleated trousers",
-    "pinstripe trousers",
-    "paperbag waist pants",
-    "split hem pants",
-    "coated jeans",
-    "tapered trousers",
-  ],
-  shorts: [
-    "high waisted shorts",
-    "low rise shorts",
-    "mini shorts",
-    "tailored shorts",
-    "boxer shorts style",
-    "jorts",
-  ],
-  dresses_skirts: [
-    "slip dress",
-    "gown",
-    "tennis skirt",
-    "a-line dress",
-    "bodycon dress",
-    "corset dress",
-    "tiered dress",
-    "asymmetrical skirt",
-    "slit skirt",
-    "wrap skirt",
-    "babydoll dress",
-    "cami dress",
-  ],
+  shirts: ["off shoulder top", "corset top", "button up shirt", "halter top", "tube top", "tie-front top", "ruched top", "mock neck top"],
+  jackets: ["blazer", "trench coat", "denim jacket", "leather jacket", "shacket", "moto jacket", "biker jacket", "aviator jacket"],
+  sweaters: ["v neck sweater", "cable knit", "cropped sweater", "oversized sweater", "varsity sweater", "fuzzy knit", "mohair sweater"],
+  t_shirts: ["baby tee", "oversized tee", "fitted tee", "print tee", "y2k tee", "streetwear tee"],
+  pants: ["flare pants", "low rise pants", "high waisted pants", "parachute pants", "carpenter pants", "utility pants", "pleated trousers", "pinstripe trousers"],
+  shorts: ["high waisted shorts", "low rise shorts", "mini shorts", "tailored shorts", "boxer shorts style", "jorts"],
+  dresses_skirts: ["slip dress", "gown", "tennis skirt", "a-line dress", "bodycon dress", "corset dress", "tiered dress", "asymmetrical skirt"],
+
+  hats: ["halo", "horns", "crown", "flower crown", "cat ears", "devil horns", "headphones", "bunny ears"],
+  hair: ["bangs", "curtain bangs", "wavy hair", "braids", "space buns", "mullet", "pixie cut", "coily hair"],
+  faces: ["anime face", "cute face", "angry face", "sad face", "blush face", "smile face", "visor mask", "gas mask"],
+  neck: ["layered necklace", "chain necklace", "pearl necklace", "silk scarf", "lace choker", "cross pendant"],
+  shoulder: ["shoulder armor", "shoulder companion", "shoulder plush", "shoulder dragon", "shoulder cat"],
+  front: ["camera front", "amulet front", "chest pouch", "harness front", "front satchel"],
+  back: ["angel wings", "devil wings", "back cape", "sword back accessory", "guitar back", "plush backpack"],
+  waist: ["waist chain", "katana waist", "holster waist", "hip accessory", "belt pouch", "waist skirt"],
 };
 
 const TAB_LONGTAIL = {
-  shirts: ["henley top", "shirred top", "tunic top", "one shoulder top", "bardot top", "keyhole top"],
-  jackets: ["raincoat jacket", "sherpa jacket", "utility jacket", "nylon jacket", "shell jacket", "puffer vest"],
-  sweaters: ["intarsia knit", "ribbed knit sweater", "open knit top", "jersey knit top", "mock neck knit"],
-  t_shirts: ["washed tee", "minimal tee", "logo print tee", "boxy tee", "cropped graphic tee"],
-  pants: ["stirrup pants", "barrel jeans", "horseshoe jeans", "stacked jeans", "ripstop pants", "tech cargo"],
-  shorts: ["boyshort shorts", "utility shorts", "micro shorts", "denim cutoffs", "running short shorts"],
-  dresses_skirts: ["drop-waist dress", "empire waist dress", "prairie dress", "bubble skirt", "godet skirt"],
+  shirts: ["henley top", "shirred top", "tunic top", "one shoulder top", "bardot top"],
+  jackets: ["raincoat jacket", "sherpa jacket", "utility jacket", "nylon jacket", "shell jacket"],
+  sweaters: ["intarsia knit", "ribbed knit sweater", "open knit top", "jersey knit top"],
+  t_shirts: ["washed tee", "minimal tee", "boxy tee", "cropped graphic tee"],
+  pants: ["stirrup pants", "barrel jeans", "horseshoe jeans", "stacked jeans", "ripstop pants"],
+  shorts: ["boyshort shorts", "utility shorts", "micro shorts", "denim cutoffs"],
+  dresses_skirts: ["drop-waist dress", "empire waist dress", "prairie dress", "bubble skirt"],
+  hats: ["pillbox hat", "fascinator", "newsboy cap", "visor hat"],
+  hair: ["asymmetrical bob", "layered pixie", "micro bangs", "coquette pigtails"],
+  faces: ["half mask", "neon visor", "cyber face accessory", "mystic veil"],
+  neck: ["ruff collar", "tech collar", "ribbon choker", "metal collar"],
+  shoulder: ["epaulette shoulder", "tactical shoulder", "ethereal shoulder wings", "mecha shoulder"],
+  front: ["chest insignia", "front emblem", "front plush carrier", "modular chest rig"],
+  back: ["back aura", "back banner", "back totem", "ornamental backpiece"],
+  waist: ["samurai waist", "ornamental sash", "waist tassel", "battle belt"],
 };
 
 const GLOBAL_STYLE_TERMS = [
-  "haute couture",
-  "ready-to-wear",
-  "pret a porter",
+  "high fashion",
   "runway inspired",
   "editorial inspired",
-  "high fashion",
   "luxury streetwear",
   "quiet luxury",
   "loud luxury",
-  "minimal luxe",
   "street luxe",
   "urban chic",
-  "statement look",
   "capsule wardrobe",
   "signature style",
-  "timeless style",
-  "heritage style",
   "dark coquette",
   "soft grunge",
   "kawaii goth",
   "street goth",
   "cyber y2k",
   "futuristic y2k",
-  "digitalcore",
-  "virtualcore",
-  "metaverse fashion",
   "avatarcore",
   "animecore",
-  "mangacore",
   "scenecore",
   "vampcore",
   "celestialcore",
-  "galaxycore",
   "spacecore",
   "forestcore",
-  "oceancore",
   "royalcore",
   "princesscore",
-  "gothic lolita",
-  "sweet lolita",
-  "classic lolita",
-  "decora kei",
   "visual kei",
-  "gyaru style",
-  "hime gyaru",
-  "ulzzang fashion",
-  "kfashion",
-  "idol style",
   "harajuku style",
-  "main character energy",
-  "model off duty",
 ];
 
 const SHOE_BUNDLE_KEYWORDS = [
@@ -312,12 +219,10 @@ const SHOE_BUNDLE_KEYWORDS = [
   "block heels",
   "slingback heels",
   "court shoes",
-  "penny loafers",
-  "tassel loafers",
-  "platform sandals",
-  "gladiator sandals",
-  "lug sole boots",
 ];
+
+const memoryAssetTypeCache = new Map();
+let consecutive429 = 0;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -325,62 +230,6 @@ function sleep(ms) {
 
 function jitter(max = 500) {
   return Math.floor(Math.random() * max);
-}
-
-function cleanTypeName(v) {
-  return String(v || "").toLowerCase().replace(/[^a-z]/g, "");
-}
-
-function toAssetTypeIdFromSearch(raw) {
-  const idCandidates = [raw.assetTypeId, raw.AssetTypeId, raw.assetType];
-  for (const c of idCandidates) {
-    const n = Number(c);
-    if (Number.isFinite(n)) return n;
-  }
-  const byName = cleanTypeName(raw.assetTypeName || raw.AssetTypeName || raw.assetType);
-  return ASSET_TYPE_NAME_TO_ID[byName] ?? null;
-}
-
-function toAssetTypeNameFromSearch(raw) {
-  const n = raw.assetTypeName || raw.AssetTypeName || raw.assetType || "";
-  return String(n || "");
-}
-
-function isBundleLike(raw) {
-  const t = String(raw.itemType || raw.assetType || raw.assetTypeName || "").toLowerCase();
-  return t.includes("bundle") || t.includes("package");
-}
-
-function isShoeLikeTitle(name) {
-  const n = String(name || "").toLowerCase();
-  return (
-    n.includes("shoe") ||
-    n.includes("sneaker") ||
-    n.includes("boot") ||
-    n.includes("heel") ||
-    n.includes("stiletto") ||
-    n.includes("loafer") ||
-    n.includes("sandal") ||
-    n.includes("mary jane") ||
-    n.includes("mule") ||
-    n.includes("clog")
-  );
-}
-
-function normalizeSubcategory(tabKey) {
-  if (tabKey === "all") return null;
-  return tabKey || null;
-}
-
-function buildSearchUrl({ category, keyword, cursor, limit }) {
-  const url = new URL("https://catalog.roblox.com/v1/search/items/details");
-  url.searchParams.set("Category", String(category));
-  url.searchParams.set("Limit", String(limit || PAGE_LIMIT));
-  url.searchParams.set("SortType", "3");
-  url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
-  if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
-  if (cursor) url.searchParams.set("Cursor", cursor);
-  return url.toString();
 }
 
 function hashSeed(s) {
@@ -405,6 +254,68 @@ function rotatedSlice(list, maxCount, seedKey) {
   return out;
 }
 
+function cleanTypeName(v) {
+  return String(v || "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function toAssetTypeIdFromSearch(raw) {
+  const idCandidates = [raw.assetTypeId, raw.AssetTypeId, raw.assetType];
+  for (const c of idCandidates) {
+    const n = Number(c);
+    if (Number.isFinite(n)) return n;
+  }
+  const byName = cleanTypeName(raw.assetTypeName || raw.AssetTypeName || raw.assetType);
+  return ASSET_TYPE_NAME_TO_ID[byName] ?? null;
+}
+
+function toAssetTypeNameFromSearch(raw) {
+  const n = raw.assetTypeName || raw.AssetTypeName || raw.assetType || "";
+  return String(n || "");
+}
+
+function classifyByType(assetTypeId, fallbackCategory, fallbackSubtab) {
+  if (assetTypeId != null && TYPE_TO_GROUP[assetTypeId]) {
+    return TYPE_TO_GROUP[assetTypeId];
+  }
+
+  if (fallbackCategory === "accessories") {
+    return { category: "accessories", subcategory: fallbackSubtab || "all" };
+  }
+  return { category: "clothing", subcategory: fallbackSubtab || null };
+}
+
+function isBundleLike(raw) {
+  const t = String(raw.itemType || raw.assetType || raw.assetTypeName || "").toLowerCase();
+  return t.includes("bundle") || t.includes("package");
+}
+
+function isShoeLikeTitle(name) {
+  const n = String(name || "").toLowerCase();
+  return (
+    n.includes("shoe") ||
+    n.includes("sneaker") ||
+    n.includes("boot") ||
+    n.includes("heel") ||
+    n.includes("stiletto") ||
+    n.includes("loafer") ||
+    n.includes("sandal") ||
+    n.includes("mary jane") ||
+    n.includes("mule") ||
+    n.includes("clog")
+  );
+}
+
+function buildSearchUrl({ category, keyword, cursor, limit }) {
+  const url = new URL("https://catalog.roblox.com/v1/search/items/details");
+  url.searchParams.set("Category", String(category));
+  url.searchParams.set("Limit", String(limit || PAGE_LIMIT));
+  url.searchParams.set("SortType", "3");
+  url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
+  if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
+  if (cursor) url.searchParams.set("Cursor", cursor);
+  return url.toString();
+}
+
 async function fetchJsonWithRetry(url, tries, label) {
   for (let attempt = 1; attempt <= tries; attempt += 1) {
     try {
@@ -422,7 +333,7 @@ async function fetchJsonWithRetry(url, tries, label) {
 
       if (res.status === 429) {
         consecutive429 += 1;
-        const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt * attempt) + jitter(900);
+        const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt * attempt) + jitter(700);
         console.log(`[429] ${label} retry ${attempt}/${tries} in ${waitMs}ms -> ${url}`);
         await sleep(waitMs);
 
@@ -434,6 +345,12 @@ async function fetchJsonWithRetry(url, tries, label) {
         continue;
       }
 
+      if (res.status === 400) {
+        const text = await res.text().catch(() => "");
+        console.log(`[400] ${label} give up -> ${url} ${text.slice(0, 180)}`);
+        return null;
+      }
+
       if (res.status >= 500 && attempt < tries) {
         const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(600);
         console.log(`[${res.status}] ${label} retry ${attempt}/${tries} in ${waitMs}ms`);
@@ -442,7 +359,7 @@ async function fetchJsonWithRetry(url, tries, label) {
       }
 
       const text = await res.text().catch(() => "");
-      console.log(`[${res.status}] ${label} give up -> ${url} ${text.slice(0, 160)}`);
+      console.log(`[${res.status}] ${label} give up -> ${url} ${text.slice(0, 180)}`);
       return null;
     } catch (err) {
       if (attempt >= tries) {
@@ -481,7 +398,7 @@ function extractAssetMeta(details) {
   };
 }
 
-function normalizeSearchItem(raw, tabKey) {
+function normalizeSearchItem(raw) {
   const creator = raw.creator || {};
   const creatorIdRaw =
     creator.id ??
@@ -492,8 +409,6 @@ function normalizeSearchItem(raw, tabKey) {
 
   const creatorId = Number.isFinite(Number(creatorIdRaw)) ? Number(creatorIdRaw) : null;
   const assetId = Number(raw.id);
-  const typeId = toAssetTypeIdFromSearch(raw);
-  const typeName = toAssetTypeNameFromSearch(raw);
 
   return {
     asset_id: Number.isFinite(assetId) ? assetId : null,
@@ -504,7 +419,7 @@ function normalizeSearchItem(raw, tabKey) {
     creator_type: creator.type || raw.creatorType || "",
     item_type: raw.itemType || raw.assetType || raw.assetTypeName || "",
     category: "clothing",
-    subcategory: normalizeSubcategory(tabKey),
+    subcategory: null,
     thumbnail_url: raw.thumbnailUrl || "",
     is_offsale:
       raw.itemRestrictions?.includes?.("Offsale") ||
@@ -519,8 +434,8 @@ function normalizeSearchItem(raw, tabKey) {
       raw.isLimitedUnique === true ||
       false,
     price_robux: Number.isFinite(raw.price) ? raw.price : null,
-    asset_type_id: typeId,
-    asset_type_name: typeName,
+    asset_type_id: toAssetTypeIdFromSearch(raw),
+    asset_type_name: toAssetTypeNameFromSearch(raw),
   };
 }
 
@@ -616,15 +531,16 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_id INTEGER;`);
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_name TEXT;`);
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
+
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS subcategory TEXT DEFAULT 'misc';`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'bundle';`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_subcategory ON public.catalog_items(subcategory);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_subcategory ON public.catalog_items(subcategory);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_subcategory ON public.catalog_bundles(subcategory);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_bundle_id ON public.bundle_asset_links(bundle_id);`);
 }
@@ -812,19 +728,15 @@ function buildTabTerms(tabKey, runSeed) {
   return [...new Set([...core, ...boost, ...longTail])];
 }
 
-function buildCrawlPlan(runSeed) {
-  const plan = [{ key: "all", passes: [{ keyword: "", intent: "all", category: CLOTHING_CATEGORY }] }];
+function buildPlan(runSeed) {
+  const clothingPlan = [{ key: "all", categoryGroup: "clothing", passes: [{ keyword: "", categoryId: CLOTHING_CATEGORY }] }];
 
-  const rotatedGlobal = rotatedSlice(
-    GLOBAL_STYLE_TERMS,
-    MAX_GLOBAL_TERMS_PER_RUN,
-    `${runSeed}:global:style`
-  );
-  for (const kw of rotatedGlobal) {
-    plan[0].passes.push({ keyword: kw, intent: "global_style", category: CLOTHING_CATEGORY });
+  const globalTerms = rotatedSlice(GLOBAL_STYLE_TERMS, MAX_GLOBAL_TERMS_PER_RUN, `${runSeed}:global`);
+  for (const kw of globalTerms) {
+    clothingPlan[0].passes.push({ keyword: kw, categoryId: CLOTHING_CATEGORY });
   }
 
-  const orderedKeys = [
+  const clothingKeys = [
     "classic_shirts",
     "classic_pants",
     "classic_t_shirts",
@@ -837,20 +749,30 @@ function buildCrawlPlan(runSeed) {
     "dresses_skirts",
   ];
 
-  for (const key of orderedKeys) {
+  for (const key of clothingKeys) {
     const terms = buildTabTerms(key, runSeed);
-    const passes = terms.map((keyword) => ({
-      keyword,
-      intent: "discovery",
-      category: CLOTHING_CATEGORY,
-    }));
-    plan.push({ key, passes });
+    clothingPlan.push({
+      key,
+      categoryGroup: "clothing",
+      passes: terms.map((keyword) => ({ keyword, categoryId: CLOTHING_CATEGORY })),
+    });
   }
 
-  return plan;
+  const accessoryKeys = ["hats", "hair", "faces", "neck", "shoulder", "front", "back", "waist"];
+  const accessoryPlan = [];
+  for (const key of accessoryKeys) {
+    const terms = buildTabTerms(key, runSeed);
+    const passes = [];
+    for (const t of terms) {
+      passes.push(...ACCESSORY_DISCOVERY_CATEGORIES.map((catId) => ({ keyword: t, categoryId: catId })));
+    }
+    accessoryPlan.push({ key, categoryGroup: "accessories", passes });
+  }
+
+  return { clothingPlan, accessoryPlan };
 }
 
-async function crawlItemPass(tabKey, passConfig) {
+async function crawlItemPass(tabKey, passConfig, categoryGroup) {
   let cursor = null;
   let pages = 0;
   let upserts = 0;
@@ -858,7 +780,7 @@ async function crawlItemPass(tabKey, passConfig) {
 
   while (pages < MAX_PAGES_PER_PASS) {
     const url = buildSearchUrl({
-      category: passConfig.category || CLOTHING_CATEGORY,
+      category: passConfig.categoryId,
       keyword: passConfig.keyword,
       cursor,
       limit: PAGE_LIMIT,
@@ -873,13 +795,25 @@ async function crawlItemPass(tabKey, passConfig) {
     const rows = Array.isArray(json.data) ? json.data : [];
     if (rows.length === 0) break;
 
-    const items = rows
-      .map((raw) => normalizeSearchItem(raw, tabKey))
-      .filter((i) => Number.isFinite(i.asset_id));
-
+    const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
     await enrichAssetTypes(items);
 
     for (const item of items) {
+      const t = item.asset_type_id == null ? null : Number(item.asset_type_id);
+      const classified = classifyByType(t, categoryGroup, tabKey);
+
+      item.category = classified.category;
+      item.subcategory = classified.subcategory;
+
+      // Strict rule: shoes subtab content should only come from bundles.
+      // So if it is a non-70/71 accessory that "looks like shoes", it stays in canonical type tab.
+      if (classified.category === "clothing" && classified.subcategory === "shoes") {
+        if (t !== SHOE_LEFT_TYPE && t !== SHOE_RIGHT_TYPE) {
+          // keep canonical mapping from type map; if this happened without 70/71, downgrade to all-clothing bucket
+          item.subcategory = tabKey === "shoes" ? null : tabKey;
+        }
+      }
+
       await upsertItem(item);
       upserts += 1;
     }
@@ -889,10 +823,12 @@ async function crawlItemPass(tabKey, passConfig) {
     cursor = json.nextPageCursor || null;
     if (!cursor) break;
 
-    await sleep(DELAY_MS + jitter(700));
+    await sleep(DELAY_MS + jitter(800));
   }
 
-  console.log(`[crawl] ${tabKey} keyword="${passConfig.keyword}" pages=${pages} seen=${seen} upserts=${upserts}`);
+  console.log(
+    `[crawl] ${tabKey} keyword="${passConfig.keyword}" cat=${passConfig.categoryId} pages=${pages} seen=${seen} upserts=${upserts}`
+  );
 }
 
 async function crawlShoeBundles(runSeed) {
@@ -901,51 +837,41 @@ async function crawlShoeBundles(runSeed) {
   let acceptedPairs = 0;
   let linkedAssets = 0;
 
-  const rotatedShoeKeywords = rotatedSlice(
-    SHOE_BUNDLE_KEYWORDS,
-    Math.max(10, Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 20)),
-    `${runSeed}:shoes:bundles`
-  );
+  const shoeTerms = rotatedSlice(SHOE_BUNDLE_KEYWORDS, MAX_SHOE_TERMS_PER_RUN, `${runSeed}:shoes`);
 
-  for (const category of [CLOTHING_CATEGORY, ...ALT_DISCOVERY_CATEGORIES]) {
-    for (const keyword of rotatedShoeKeywords) {
+  for (const categoryId of [CLOTHING_CATEGORY, ...ACCESSORY_DISCOVERY_CATEGORIES]) {
+    for (const keyword of shoeTerms) {
       let cursor = null;
       let pages = 0;
 
       while (pages < SHOE_BUNDLE_PAGES) {
         const url = buildSearchUrl({
-          category,
+          category: categoryId,
           keyword,
           cursor,
           limit: PAGE_LIMIT,
         });
 
         const json = await fetchJsonWithRetry(url, SEARCH_RETRIES, `shoe-search:${keyword}`);
-        if (!json) {
-          console.log(`[crawl-bundles] keyword="${keyword}" stopped (search unavailable)`);
-          break;
-        }
+        if (!json) break;
 
         const rows = Array.isArray(json.data) ? json.data : [];
 
         for (const raw of rows) {
-          const candidateId = Number(raw.id);
-          if (!Number.isFinite(candidateId)) continue;
-          if (seenBundles.has(candidateId)) continue;
-
+          const bundleId = Number(raw.id);
+          if (!Number.isFinite(bundleId)) continue;
+          if (seenBundles.has(bundleId)) continue;
           if (!isBundleLike(raw) && !isShoeLikeTitle(raw.name || "")) continue;
 
-          const bundleDetails = await fetchBundleDetailsWithRetry(candidateId);
+          const bundleDetails = await fetchBundleDetailsWithRetry(bundleId);
           if (!bundleDetails || !Array.isArray(bundleDetails.items)) continue;
 
-          seenBundles.add(candidateId);
+          seenBundles.add(bundleId);
           discovered += 1;
 
           const creator = bundleDetails.creator || raw.creator || {};
           const creatorIdRaw = creator.id ?? creator.creatorTargetId ?? raw.creatorId ?? null;
           const creatorId = Number.isFinite(Number(creatorIdRaw)) ? Number(creatorIdRaw) : null;
-
-          const bundleName = String(bundleDetails.name ?? raw.name ?? `Bundle ${candidateId}`);
 
           let hasLeft = false;
           let hasRight = false;
@@ -966,18 +892,20 @@ async function crawlShoeBundles(runSeed) {
             }
 
             const item = normalizeEconomyAsset(assetDetails);
-            item.subcategory = "shoes";
             if (!Number.isFinite(item.asset_id)) {
               await sleep(ASSET_META_DELAY_MS);
               continue;
             }
 
-            await upsertItem(item);
-
             const finalType =
               Number.isFinite(Number(item.asset_type_id))
                 ? Number(item.asset_type_id)
                 : (Number.isFinite(bundleReportedType) ? bundleReportedType : null);
+
+            const classified = classifyByType(finalType, "clothing", null);
+            item.category = classified.category;
+            item.subcategory = classified.subcategory;
+            await upsertItem(item);
 
             let role = null;
             if (finalType === SHOE_LEFT_TYPE) {
@@ -989,7 +917,7 @@ async function crawlShoeBundles(runSeed) {
             }
 
             linkDrafts.push({
-              bundle_id: candidateId,
+              bundle_id: bundleId,
               asset_id: item.asset_id,
               role,
               asset_type_id: finalType,
@@ -1007,8 +935,8 @@ async function crawlShoeBundles(runSeed) {
           acceptedPairs += 1;
 
           await upsertBundle({
-            bundle_id: candidateId,
-            name: bundleName,
+            bundle_id: bundleId,
+            name: String(bundleDetails.name ?? raw.name ?? `Bundle ${bundleId}`),
             description: String(bundleDetails.description ?? raw.description ?? ""),
             creator_name: String(creator.name ?? raw.creatorName ?? ""),
             creator_id: creatorId,
@@ -1016,7 +944,7 @@ async function crawlShoeBundles(runSeed) {
             bundle_type: String(bundleDetails.bundleType ?? raw.itemType ?? "Bundle"),
             category: "clothing",
             subcategory: "shoes",
-            thumbnail_url: `rbxthumb://type=BundleThumbnail&id=${candidateId}&w=420&h=420`,
+            thumbnail_url: `rbxthumb://type=BundleThumbnail&id=${bundleId}&w=420&h=420`,
             is_offsale: false,
             price_robux: null,
           });
@@ -1077,14 +1005,19 @@ async function main() {
 
     await ensureSchema();
 
-    const runSeedBase = Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS));
-    const runSeed = String(runSeedBase);
+    const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
+    const { clothingPlan, accessoryPlan } = buildPlan(runSeed);
 
-    const plan = buildCrawlPlan(runSeed);
-
-    for (const tab of plan) {
+    for (const tab of clothingPlan) {
       for (const pass of tab.passes) {
-        await crawlItemPass(tab.key, pass);
+        await crawlItemPass(tab.key, pass, tab.categoryGroup);
+        await sleep(DELAY_MS + jitter(500));
+      }
+    }
+
+    for (const tab of accessoryPlan) {
+      for (const pass of tab.passes) {
+        await crawlItemPass(tab.key, pass, tab.categoryGroup);
         await sleep(DELAY_MS + jitter(500));
       }
     }

@@ -20,27 +20,50 @@ const CLASSIC_TSHIRT_TYPE = 2;
 const CLASSIC_SHIRT_TYPE = 11;
 const CLASSIC_PANTS_TYPE = 12;
 
+const HAT_ACCESSORY_TYPE = 8;
+const HAIR_ACCESSORY_TYPE = 41;
+const FACE_ACCESSORY_TYPE = 42;
+const NECK_ACCESSORY_TYPE = 43;
+const SHOULDER_ACCESSORY_TYPE = 44;
+const FRONT_ACCESSORY_TYPE = 45;
+const BACK_ACCESSORY_TYPE = 46;
+const WAIST_ACCESSORY_TYPE = 47;
+
 const SHOE_LEFT_TYPE = 70;
 const SHOE_RIGHT_TYPE = 71;
 
 const LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 70, 71, 72];
 const NON_SHOE_LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 72];
 const CLASSIC_CLOTHING_TYPES = [CLASSIC_TSHIRT_TYPE, CLASSIC_SHIRT_TYPE, CLASSIC_PANTS_TYPE];
+const ALL_ACCESSORY_TYPES = [
+  HAT_ACCESSORY_TYPE,
+  HAIR_ACCESSORY_TYPE,
+  FACE_ACCESSORY_TYPE,
+  NECK_ACCESSORY_TYPE,
+  SHOULDER_ACCESSORY_TYPE,
+  FRONT_ACCESSORY_TYPE,
+  BACK_ACCESSORY_TYPE,
+  WAIST_ACCESSORY_TYPE,
+];
 
 const PLACEHOLDER = "rbxasset://textures/ui/GuiImagePlaceholder.png";
 
 const SUBTAB_ALIASES = {
   all: "all",
+
   classicshirts: "classic_shirts",
   "classic shirts": "classic_shirts",
   classic_shirts: "classic_shirts",
+
   classicpants: "classic_pants",
   "classic pants": "classic_pants",
   classic_pants: "classic_pants",
+
   classictshirts: "classic_t_shirts",
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
+
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -55,6 +78,15 @@ const SUBTAB_ALIASES = {
   "dresses and skirts": "dresses_skirts",
   dresses_skirts: "dresses_skirts",
   shoes: "shoes",
+
+  hats: "hats",
+  hair: "hair",
+  faces: "faces",
+  neck: "neck",
+  shoulder: "shoulder",
+  front: "front",
+  back: "back",
+  waist: "waist",
 };
 
 const TERM_ALIASES = {
@@ -108,7 +140,6 @@ function normalizeQuery(qRaw) {
 function expandWordForms(word) {
   const w = String(word || "").toLowerCase().trim();
   if (!w) return [];
-
   const out = new Set([w]);
 
   if (w.includes("-")) out.add(w.replace(/-/g, " "));
@@ -268,7 +299,19 @@ function sanitizeItem(item) {
   return clone;
 }
 
-function getSubtabSpec(subtab) {
+function getSubtabSpec(category, subtab) {
+  if (category === "accessories") {
+    if (subtab === "hats") return { mode: "accessory", allowedTypes: [HAT_ACCESSORY_TYPE] };
+    if (subtab === "hair") return { mode: "accessory", allowedTypes: [HAIR_ACCESSORY_TYPE] };
+    if (subtab === "faces") return { mode: "accessory", allowedTypes: [FACE_ACCESSORY_TYPE] };
+    if (subtab === "neck") return { mode: "accessory", allowedTypes: [NECK_ACCESSORY_TYPE] };
+    if (subtab === "shoulder") return { mode: "accessory", allowedTypes: [SHOULDER_ACCESSORY_TYPE] };
+    if (subtab === "front") return { mode: "accessory", allowedTypes: [FRONT_ACCESSORY_TYPE] };
+    if (subtab === "back") return { mode: "accessory", allowedTypes: [BACK_ACCESSORY_TYPE] };
+    if (subtab === "waist") return { mode: "accessory", allowedTypes: [WAIST_ACCESSORY_TYPE] };
+    return { mode: "accessory", allowedTypes: ALL_ACCESSORY_TYPES };
+  }
+
   if (subtab === "classic_shirts") return { mode: "classic", allowedTypes: [CLASSIC_SHIRT_TYPE] };
   if (subtab === "classic_pants") return { mode: "classic", allowedTypes: [CLASSIC_PANTS_TYPE] };
   if (subtab === "classic_t_shirts") return { mode: "classic", allowedTypes: [CLASSIC_TSHIRT_TYPE] };
@@ -400,6 +443,7 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_subcategory ON public.catalog_items(subcategory);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_name_lower ON public.catalog_items((lower(name)));`);
@@ -419,6 +463,331 @@ async function ensureSchemaOnce() {
   schemaReady = true;
 }
 
+async function queryClothingShoesBundles(category, terms, fetchLimit, fetchOffset) {
+  const sql = `
+    SELECT
+      b.*,
+      1 AS sort_bucket,
+      CASE
+        WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
+          THEN 'rbxthumb://type=GroupIcon&id=' || b.creator_id::text || '&w=150&h=150'
+        WHEN b.creator_id IS NOT NULL
+          THEN 'rbxthumb://type=AvatarHeadShot&id=' || b.creator_id::text || '&w=150&h=150'
+        ELSE '${PLACEHOLDER}'
+      END AS creator_avatar_url
+    FROM public.catalog_bundles b
+    WHERE lower(coalesce(b.category, '')) = $1
+      AND lower(coalesce(b.subcategory, '')) = 'shoes'
+      AND EXISTS (
+        SELECT 1 FROM public.bundle_asset_links l
+        WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_LEFT_TYPE}
+      )
+      AND EXISTS (
+        SELECT 1 FROM public.bundle_asset_links l
+        WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_RIGHT_TYPE}
+      )
+      AND (
+        $2::text IS NULL
+        OR lower(coalesce(b.name,'')) LIKE $2
+        OR lower(coalesce(b.creator_name,'')) LIKE $2
+        OR ($3::bigint IS NOT NULL AND b.bundle_id = $3)
+        OR ($4::text[] IS NOT NULL AND lower(coalesce(b.name,'')) LIKE ANY($4::text[]))
+        OR ($4::text[] IS NOT NULL AND lower(coalesce(b.creator_name,'')) LIKE ANY($4::text[]))
+        OR EXISTS (
+          SELECT 1
+          FROM public.bundle_asset_links l
+          JOIN public.catalog_items i ON i.asset_id = l.asset_id
+          WHERE l.bundle_id = b.bundle_id
+            AND (
+              lower(coalesce(i.name,'')) LIKE $2
+              OR lower(coalesce(i.creator_name,'')) LIKE $2
+              OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+              OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+              OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
+            )
+        )
+      )
+    ORDER BY b.updated_at DESC, b.bundle_id DESC
+    LIMIT $5 OFFSET $6;
+  `;
+
+  const { rows } = await pool.query(sql, [
+    category,
+    terms.phraseLike,
+    terms.qNumeric,
+    terms.tokenLikes,
+    fetchLimit,
+    fetchOffset,
+  ]);
+
+  return rows.map(mapBundleRow);
+}
+
+async function queryAllStrict(category, terms, fetchLimit, fetchOffset) {
+  const sql = `
+    WITH item_rows AS (
+      SELECT
+        i.asset_id,
+        i.name,
+        i.category,
+        i.subcategory,
+        i.item_type,
+        i.asset_type_id,
+        i.asset_type_name,
+        i.creator_id,
+        i.creator_name,
+        i.creator_type,
+        i.description,
+        i.thumbnail_url,
+        i.is_offsale,
+        i.is_limited,
+        i.is_limited_unique,
+        i.price_robux,
+        i.updated_at,
+        false AS is_bundle_parent,
+        'asset'::text AS detail_kind,
+        NULL::text AS role,
+        CASE
+          WHEN i.asset_type_id = ANY($7::int[]) THEN 0
+          WHEN i.asset_type_id = ANY($8::int[]) THEN 2
+          ELSE 3
+        END AS sort_bucket,
+        CASE
+          WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
+            THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
+          WHEN i.creator_id IS NOT NULL
+            THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
+          ELSE '${PLACEHOLDER}'
+        END AS creator_avatar_url
+      FROM public.catalog_items i
+      WHERE lower(coalesce(i.category, '')) = $1
+        AND (
+          i.asset_type_id = ANY($7::int[])
+          OR i.asset_type_id = ANY($8::int[])
+        )
+        AND (
+          $2::text IS NULL
+          OR lower(coalesce(i.name,'')) LIKE $2
+          OR lower(coalesce(i.creator_name,'')) LIKE $2
+          OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+          OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+          OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
+        )
+    ),
+    bundle_rows AS (
+      SELECT
+        b.bundle_id AS asset_id,
+        b.name,
+        b.category,
+        b.subcategory,
+        'bundle'::text AS item_type,
+        NULL::int AS asset_type_id,
+        NULL::text AS asset_type_name,
+        b.creator_id,
+        b.creator_name,
+        b.creator_type,
+        b.description,
+        b.thumbnail_url,
+        b.is_offsale,
+        false AS is_limited,
+        false AS is_limited_unique,
+        b.price_robux,
+        b.updated_at,
+        true AS is_bundle_parent,
+        'bundle'::text AS detail_kind,
+        NULL::text AS role,
+        1 AS sort_bucket,
+        CASE
+          WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
+            THEN 'rbxthumb://type=GroupIcon&id=' || b.creator_id::text || '&w=150&h=150'
+          WHEN b.creator_id IS NOT NULL
+            THEN 'rbxthumb://type=AvatarHeadShot&id=' || b.creator_id::text || '&w=150&h=150'
+          ELSE '${PLACEHOLDER}'
+        END AS creator_avatar_url
+      FROM public.catalog_bundles b
+      WHERE lower(coalesce(b.category, '')) = $1
+        AND lower(coalesce(b.subcategory, '')) = 'shoes'
+        AND EXISTS (
+          SELECT 1 FROM public.bundle_asset_links l
+          WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_LEFT_TYPE}
+        )
+        AND EXISTS (
+          SELECT 1 FROM public.bundle_asset_links l
+          WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_RIGHT_TYPE}
+        )
+        AND (
+          $2::text IS NULL
+          OR lower(coalesce(b.name,'')) LIKE $2
+          OR lower(coalesce(b.creator_name,'')) LIKE $2
+          OR ($3::bigint IS NOT NULL AND b.bundle_id = $3)
+          OR ($4::text[] IS NOT NULL AND lower(coalesce(b.name,'')) LIKE ANY($4::text[]))
+          OR ($4::text[] IS NOT NULL AND lower(coalesce(b.creator_name,'')) LIKE ANY($4::text[]))
+          OR EXISTS (
+            SELECT 1
+            FROM public.bundle_asset_links l
+            JOIN public.catalog_items i ON i.asset_id = l.asset_id
+            WHERE l.bundle_id = b.bundle_id
+              AND (
+                lower(coalesce(i.name,'')) LIKE $2
+                OR lower(coalesce(i.creator_name,'')) LIKE $2
+                OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+                OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+                OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
+              )
+          )
+        )
+    )
+    SELECT * FROM (
+      SELECT * FROM item_rows
+      UNION ALL
+      SELECT * FROM bundle_rows
+    ) u
+    ORDER BY u.sort_bucket ASC, u.updated_at DESC, u.asset_id DESC
+    LIMIT $5 OFFSET $6;
+  `;
+
+  const { rows } = await pool.query(sql, [
+    category,
+    terms.phraseLike,
+    terms.qNumeric,
+    terms.tokenLikes,
+    fetchLimit,
+    fetchOffset,
+    NON_SHOE_LAYERED_TYPES,
+    CLASSIC_CLOTHING_TYPES,
+  ]);
+
+  return rows.map((r) => (r.is_bundle_parent ? mapBundleRow(r) : mapItemRow(r)));
+}
+
+async function queryItemsByAllowedTypes(category, terms, allowedTypes, fallbackRegex, fetchLimit, fetchOffset) {
+  const params = [category, terms.phraseLike, terms.qNumeric, terms.tokenLikes, allowedTypes];
+  let where = `
+    WHERE lower(coalesce(i.category, '')) = $1
+      AND (
+        $2::text IS NULL
+        OR lower(coalesce(i.name,'')) LIKE $2
+        OR lower(coalesce(i.creator_name,'')) LIKE $2
+        OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+        OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+        OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
+      )
+  `;
+
+  let orderSql = "i.updated_at DESC, i.asset_id DESC";
+
+  if (fallbackRegex) {
+    params.push(fallbackRegex);
+    const regexIdx = params.length;
+    where += `
+      AND (
+        i.asset_type_id = ANY($5::int[])
+        OR (
+          i.asset_type_id = ANY($6::int[])
+          AND lower(coalesce(i.name,'')) ~ $${regexIdx}
+        )
+      )
+    `;
+    params.splice(5, 0, allowedTypes[1]); // not used here in this helper
+  } else {
+    where += ` AND i.asset_type_id = ANY($5::int[])`;
+  }
+
+  params.push(fetchLimit, fetchOffset);
+
+  const sql = `
+    SELECT
+      i.*,
+      0 AS sort_bucket,
+      CASE
+        WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
+          THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
+        WHEN i.creator_id IS NOT NULL
+          THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
+        ELSE '${PLACEHOLDER}'
+      END AS creator_avatar_url
+    FROM public.catalog_items i
+    ${where}
+    ORDER BY ${orderSql}
+    LIMIT $${params.length - 1}
+    OFFSET $${params.length};
+  `;
+
+  const { rows } = await pool.query(sql, params);
+  return rows.map(mapItemRow);
+}
+
+async function queryLayeredOrClassic(category, terms, spec, fetchLimit, fetchOffset) {
+  const params = [category, terms.phraseLike, terms.qNumeric, terms.tokenLikes];
+  let where = `
+    WHERE lower(coalesce(i.category, '')) = $1
+      AND (
+        $2::text IS NULL
+        OR lower(coalesce(i.name,'')) LIKE $2
+        OR lower(coalesce(i.creator_name,'')) LIKE $2
+        OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+        OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+        OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
+      )
+  `;
+  let orderSql = "i.updated_at DESC, i.asset_id DESC";
+
+  if (spec.mode === "classic" || spec.mode === "accessory") {
+    params.push(spec.allowedTypes);
+    where += ` AND i.asset_type_id = ANY($${params.length}::int[])`;
+  } else if (spec.mode === "layered") {
+    params.push(spec.layeredTypes);
+    const layeredIdx = params.length;
+
+    if (spec.fallbackClassicTypes && spec.fallbackClassicTypes.length > 0) {
+      params.push(spec.fallbackClassicTypes);
+      const fallbackIdx = params.length;
+      params.push(spec.fallbackTitleRegex);
+      const regexIdx = params.length;
+
+      where += `
+        AND (
+          i.asset_type_id = ANY($${layeredIdx}::int[])
+          OR (
+            i.asset_type_id = ANY($${fallbackIdx}::int[])
+            AND lower(coalesce(i.name,'')) ~ $${regexIdx}
+          )
+        )
+      `;
+    } else {
+      where += ` AND i.asset_type_id = ANY($${layeredIdx}::int[])`;
+    }
+
+    orderSql = `
+      CASE WHEN i.asset_type_id = ANY($${layeredIdx}::int[]) THEN 0 ELSE 1 END,
+      i.updated_at DESC,
+      i.asset_id DESC
+    `;
+  }
+
+  params.push(fetchLimit, fetchOffset);
+  const sql = `
+    SELECT
+      i.*,
+      0 AS sort_bucket,
+      CASE
+        WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
+          THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
+        WHEN i.creator_id IS NOT NULL
+          THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
+        ELSE '${PLACEHOLDER}'
+      END AS creator_avatar_url
+    FROM public.catalog_items i
+    ${where}
+    ORDER BY ${orderSql}
+    LIMIT $${params.length - 1}
+    OFFSET $${params.length};
+  `;
+
+  const { rows } = await pool.query(sql, params);
+  return rows.map(mapItemRow);
+}
+
 app.get("/", async () => ({ ok: true, service: "catalog-backend" }));
 app.get("/health", async () => ({ ok: true }));
 
@@ -434,279 +803,27 @@ app.get("/catalog/search", async (req, reply) => {
     const terms = buildSearchTerms(req.query.q || "");
     const hasQuery = terms.normalized.length > 0;
 
-    const cacheKey = `search:v30:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
+    const cacheKey = `search:v31:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
     }
 
-    const spec = getSubtabSpec(subtab);
+    const spec = getSubtabSpec(category, subtab);
 
-    // Query mode fetches wider and ranks in memory.
-    const widenedLimit = hasQuery
+    const fetchLimit = hasQuery
       ? Math.min(700, Math.max(limit * 10, offset + limit + 120))
       : limit;
-    const widenedOffset = hasQuery ? 0 : offset;
+    const fetchOffset = hasQuery ? 0 : offset;
 
     let items = [];
 
-    if (spec.mode === "shoes_bundle_parents") {
-      const sql = `
-        SELECT
-          b.*,
-          1 AS sort_bucket,
-          CASE
-            WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
-              THEN 'rbxthumb://type=GroupIcon&id=' || b.creator_id::text || '&w=150&h=150'
-            WHEN b.creator_id IS NOT NULL
-              THEN 'rbxthumb://type=AvatarHeadShot&id=' || b.creator_id::text || '&w=150&h=150'
-            ELSE '${PLACEHOLDER}'
-          END AS creator_avatar_url
-        FROM public.catalog_bundles b
-        WHERE lower(coalesce(b.category, '')) = $1
-          AND lower(coalesce(b.subcategory, '')) = 'shoes'
-          AND EXISTS (
-            SELECT 1 FROM public.bundle_asset_links l
-            WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_LEFT_TYPE}
-          )
-          AND EXISTS (
-            SELECT 1 FROM public.bundle_asset_links l
-            WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_RIGHT_TYPE}
-          )
-          AND (
-            $2::text IS NULL
-            OR lower(coalesce(b.name,'')) LIKE $2
-            OR lower(coalesce(b.creator_name,'')) LIKE $2
-            OR ($3::bigint IS NOT NULL AND b.bundle_id = $3)
-            OR ($4::text[] IS NOT NULL AND lower(coalesce(b.name,'')) LIKE ANY($4::text[]))
-            OR ($4::text[] IS NOT NULL AND lower(coalesce(b.creator_name,'')) LIKE ANY($4::text[]))
-            OR EXISTS (
-              SELECT 1
-              FROM public.bundle_asset_links l
-              JOIN public.catalog_items i ON i.asset_id = l.asset_id
-              WHERE l.bundle_id = b.bundle_id
-                AND (
-                  lower(coalesce(i.name,'')) LIKE $2
-                  OR lower(coalesce(i.creator_name,'')) LIKE $2
-                  OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
-                  OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
-                  OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
-                )
-            )
-          )
-        ORDER BY b.updated_at DESC, b.bundle_id DESC
-        LIMIT $5 OFFSET $6;
-      `;
-      const { rows } = await pool.query(sql, [
-        category,
-        terms.phraseLike,
-        terms.qNumeric,
-        terms.tokenLikes,
-        widenedLimit,
-        widenedOffset,
-      ]);
-      items = rows.map(mapBundleRow);
-    } else if (spec.mode === "all_strict") {
-      const sql = `
-        WITH item_rows AS (
-          SELECT
-            i.asset_id,
-            i.name,
-            i.category,
-            i.subcategory,
-            i.item_type,
-            i.asset_type_id,
-            i.asset_type_name,
-            i.creator_id,
-            i.creator_name,
-            i.creator_type,
-            i.description,
-            i.thumbnail_url,
-            i.is_offsale,
-            i.is_limited,
-            i.is_limited_unique,
-            i.price_robux,
-            i.updated_at,
-            false AS is_bundle_parent,
-            'asset'::text AS detail_kind,
-            NULL::text AS role,
-            CASE
-              WHEN i.asset_type_id = ANY($7::int[]) THEN 0
-              WHEN i.asset_type_id = ANY($8::int[]) THEN 2
-              ELSE 3
-            END AS sort_bucket,
-            CASE
-              WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
-                THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
-              WHEN i.creator_id IS NOT NULL
-                THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
-              ELSE '${PLACEHOLDER}'
-            END AS creator_avatar_url
-          FROM public.catalog_items i
-          WHERE lower(coalesce(i.category, '')) = $1
-            AND (
-              i.asset_type_id = ANY($7::int[])
-              OR i.asset_type_id = ANY($8::int[])
-            )
-            AND (
-              $2::text IS NULL
-              OR lower(coalesce(i.name,'')) LIKE $2
-              OR lower(coalesce(i.creator_name,'')) LIKE $2
-              OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
-              OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
-              OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
-            )
-        ),
-        bundle_rows AS (
-          SELECT
-            b.bundle_id AS asset_id,
-            b.name,
-            b.category,
-            b.subcategory,
-            'bundle'::text AS item_type,
-            NULL::int AS asset_type_id,
-            NULL::text AS asset_type_name,
-            b.creator_id,
-            b.creator_name,
-            b.creator_type,
-            b.description,
-            b.thumbnail_url,
-            b.is_offsale,
-            false AS is_limited,
-            false AS is_limited_unique,
-            b.price_robux,
-            b.updated_at,
-            true AS is_bundle_parent,
-            'bundle'::text AS detail_kind,
-            NULL::text AS role,
-            1 AS sort_bucket,
-            CASE
-              WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
-                THEN 'rbxthumb://type=GroupIcon&id=' || b.creator_id::text || '&w=150&h=150'
-              WHEN b.creator_id IS NOT NULL
-                THEN 'rbxthumb://type=AvatarHeadShot&id=' || b.creator_id::text || '&w=150&h=150'
-              ELSE '${PLACEHOLDER}'
-            END AS creator_avatar_url
-          FROM public.catalog_bundles b
-          WHERE lower(coalesce(b.category, '')) = $1
-            AND lower(coalesce(b.subcategory, '')) = 'shoes'
-            AND EXISTS (
-              SELECT 1 FROM public.bundle_asset_links l
-              WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_LEFT_TYPE}
-            )
-            AND EXISTS (
-              SELECT 1 FROM public.bundle_asset_links l
-              WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_RIGHT_TYPE}
-            )
-            AND (
-              $2::text IS NULL
-              OR lower(coalesce(b.name,'')) LIKE $2
-              OR lower(coalesce(b.creator_name,'')) LIKE $2
-              OR ($3::bigint IS NOT NULL AND b.bundle_id = $3)
-              OR ($4::text[] IS NOT NULL AND lower(coalesce(b.name,'')) LIKE ANY($4::text[]))
-              OR ($4::text[] IS NOT NULL AND lower(coalesce(b.creator_name,'')) LIKE ANY($4::text[]))
-              OR EXISTS (
-                SELECT 1
-                FROM public.bundle_asset_links l
-                JOIN public.catalog_items i ON i.asset_id = l.asset_id
-                WHERE l.bundle_id = b.bundle_id
-                  AND (
-                    lower(coalesce(i.name,'')) LIKE $2
-                    OR lower(coalesce(i.creator_name,'')) LIKE $2
-                    OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
-                    OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
-                    OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
-                  )
-              )
-            )
-        )
-        SELECT * FROM (
-          SELECT * FROM item_rows
-          UNION ALL
-          SELECT * FROM bundle_rows
-        ) u
-        ORDER BY u.sort_bucket ASC, u.updated_at DESC, u.asset_id DESC
-        LIMIT $5 OFFSET $6;
-      `;
-      const { rows } = await pool.query(sql, [
-        category,
-        terms.phraseLike,
-        terms.qNumeric,
-        terms.tokenLikes,
-        widenedLimit,
-        widenedOffset,
-        NON_SHOE_LAYERED_TYPES,
-        CLASSIC_CLOTHING_TYPES,
-      ]);
-      items = rows.map((r) => (r.is_bundle_parent ? mapBundleRow(r) : mapItemRow(r)));
+    if (category === "clothing" && spec.mode === "shoes_bundle_parents") {
+      items = await queryClothingShoesBundles(category, terms, fetchLimit, fetchOffset);
+    } else if (category === "clothing" && spec.mode === "all_strict") {
+      items = await queryAllStrict(category, terms, fetchLimit, fetchOffset);
     } else {
-      const params = [category, terms.phraseLike, terms.qNumeric, terms.tokenLikes];
-      let where = `
-        WHERE lower(coalesce(i.category, '')) = $1
-          AND (
-            $2::text IS NULL
-            OR lower(coalesce(i.name,'')) LIKE $2
-            OR lower(coalesce(i.creator_name,'')) LIKE $2
-            OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
-            OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
-            OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
-          )
-      `;
-      let orderSql = "i.updated_at DESC, i.asset_id DESC";
-
-      if (spec.mode === "classic") {
-        params.push(spec.allowedTypes);
-        where += ` AND i.asset_type_id = ANY($${params.length}::int[])`;
-      } else if (spec.mode === "layered") {
-        params.push(spec.layeredTypes);
-        const layeredIdx = params.length;
-
-        if (spec.fallbackClassicTypes.length > 0) {
-          params.push(spec.fallbackClassicTypes);
-          const fallbackIdx = params.length;
-          params.push(spec.fallbackTitleRegex);
-          const regexIdx = params.length;
-
-          where += `
-            AND (
-              i.asset_type_id = ANY($${layeredIdx}::int[])
-              OR (
-                i.asset_type_id = ANY($${fallbackIdx}::int[])
-                AND lower(coalesce(i.name,'')) ~ $${regexIdx}
-              )
-            )
-          `;
-        } else {
-          where += ` AND i.asset_type_id = ANY($${layeredIdx}::int[])`;
-        }
-
-        orderSql = `
-          CASE WHEN i.asset_type_id = ANY($${layeredIdx}::int[]) THEN 0 ELSE 1 END,
-          i.updated_at DESC,
-          i.asset_id DESC
-        `;
-      }
-
-      params.push(widenedLimit, widenedOffset);
-      const sql = `
-        SELECT
-          i.*,
-          CASE
-            WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
-              THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
-            WHEN i.creator_id IS NOT NULL
-              THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
-            ELSE '${PLACEHOLDER}'
-          END AS creator_avatar_url,
-          0 AS sort_bucket
-        FROM public.catalog_items i
-        ${where}
-        ORDER BY ${orderSql}
-        LIMIT $${params.length - 1}
-        OFFSET $${params.length};
-      `;
-      const { rows } = await pool.query(sql, params);
-      items = rows.map(mapItemRow);
+      items = await queryLayeredOrClassic(category, terms, spec, fetchLimit, fetchOffset);
     }
 
     if (hasQuery) {
@@ -716,11 +833,9 @@ app.get("/catalog/search", async (req, reply) => {
       items.sort((a, b) => {
         if ((b._rank || 0) !== (a._rank || 0)) return (b._rank || 0) - (a._rank || 0);
         if ((a._sort_bucket || 0) !== (b._sort_bucket || 0)) return (a._sort_bucket || 0) - (b._sort_bucket || 0);
-
         const aTime = new Date(a.updated_at || 0).getTime();
         const bTime = new Date(b.updated_at || 0).getTime();
         if (bTime !== aTime) return bTime - aTime;
-
         return Number(b.asset_id || 0) - Number(a.asset_id || 0);
       });
     }
@@ -729,11 +844,9 @@ app.get("/catalog/search", async (req, reply) => {
     let nextOffset;
 
     if (hasQuery) {
-      // Query mode uses in-memory ranked slicing.
       responseItems = items.slice(offset, offset + limit).map(sanitizeItem);
       nextOffset = items.length > offset + limit ? offset + limit : null;
     } else {
-      // Non-query mode is already SQL-paginated: do NOT re-slice by offset.
       responseItems = items.map(sanitizeItem);
       nextOffset = items.length === limit ? offset + limit : null;
     }
