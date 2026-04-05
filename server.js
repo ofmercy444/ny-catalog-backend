@@ -63,6 +63,16 @@ function normalizeTabKey(raw) {
   return SUBTAB_ALIASES[cleaned] || SUBTAB_ALIASES[compact] || "all";
 }
 
+function normalizeBundleBaseTitle(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/\((left|right)\)/g, "")
+    .replace(/\b(left|right)\b/g, "")
+    .replace(/[|:–—-]+\s*(left|right)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function getSubtabSpec(subtab) {
   if (subtab === "classic_shirts") return { mode: "classic", allowedTypes: [CLASSIC_SHIRT_TYPE] };
   if (subtab === "classic_pants") return { mode: "classic", allowedTypes: [CLASSIC_PANTS_TYPE] };
@@ -198,7 +208,6 @@ async function ensureSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_subcategory ON public.catalog_bundles(subcategory);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_updated ON public.catalog_bundles(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_name_lower ON public.catalog_bundles((lower(name)));`);
-
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_bundle_id ON public.bundle_asset_links(bundle_id);`);
 }
 
@@ -207,6 +216,18 @@ async function ensureSchemaOnce() {
   if (schemaReady) return;
   await ensureSchema();
   schemaReady = true;
+}
+
+function buildCreatorAvatar(creatorType, creatorId) {
+  const type = String(creatorType || "").toLowerCase();
+  const id = Number(creatorId);
+  if (!Number.isFinite(id) || id <= 0) {
+    return "rbxasset://textures/ui/GuiImagePlaceholder.png";
+  }
+  if (type === "group") {
+    return `rbxthumb://type=GroupIcon&id=${id}&w=150&h=150`;
+  }
+  return `rbxthumb://type=AvatarHeadShot&id=${id}&w=150&h=150`;
 }
 
 function mapItemRow(row) {
@@ -237,16 +258,16 @@ function mapItemRow(row) {
     updated_at: row.updated_at,
 
     is_layered: LAYERED_TYPES.includes(Number(row.asset_type_id)),
-    creator_avatar_url:
-      String(row.creator_type || "").toLowerCase() === "group" && row.creator_id != null
-        ? `rbxthumb://type=GroupIcon&id=${row.creator_id}&w=150&h=150`
-        : row.creator_id != null
-        ? `rbxthumb://type=AvatarHeadShot&id=${row.creator_id}&w=150&h=150`
-        : "rbxasset://textures/ui/GuiImagePlaceholder.png",
+    creator_avatar_url: buildCreatorAvatar(row.creator_type, row.creator_id),
   };
 }
 
 function mapBundleRow(row) {
+  const bundleThumb =
+    row.thumbnail_url && row.thumbnail_url !== ""
+      ? row.thumbnail_url
+      : `rbxthumb://type=BundleThumbnail&id=${row.bundle_id}&w=420&h=420`;
+
   return {
     asset_id: row.bundle_id,
     bundle_id: row.bundle_id,
@@ -264,11 +285,8 @@ function mapBundleRow(row) {
     creator_type: row.creator_type,
     description: row.description,
 
-    thumbnail_url:
-      row.thumbnail_url && row.thumbnail_url !== ""
-        ? row.thumbnail_url
-        : `rbxthumb://type=BundleThumbnail&id=${row.bundle_id}&w=420&h=420`,
-    thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${row.bundle_id}&w=420&h=420`,
+    thumbnail_url: bundleThumb,
+    thumbnail_bundle_url: bundleThumb,
     thumbnail_raw_url: row.thumbnail_url || "",
 
     is_offsale: false,
@@ -278,22 +296,17 @@ function mapBundleRow(row) {
     updated_at: row.updated_at,
 
     is_layered: false,
-    creator_avatar_url:
-      String(row.creator_type || "").toLowerCase() === "group" && row.creator_id != null
-        ? `rbxthumb://type=GroupIcon&id=${row.creator_id}&w=150&h=150`
-        : row.creator_id != null
-        ? `rbxthumb://type=AvatarHeadShot&id=${row.creator_id}&w=150&h=150`
-        : "rbxasset://textures/ui/GuiImagePlaceholder.png",
+    creator_avatar_url: buildCreatorAvatar(row.creator_type, row.creator_id),
   };
 }
 
 function mapBundleChildRow(r) {
-  const finalAssetType = r.asset_type_id != null ? r.asset_type_id : r.link_asset_type_id;
+  const finalType = r.asset_type_id != null ? r.asset_type_id : r.link_asset_type_id;
   const role =
     r.role ||
-    (Number(finalAssetType) === SHOE_LEFT_TYPE
+    (Number(finalType) === SHOE_LEFT_TYPE
       ? "left_shoe"
-      : Number(finalAssetType) === SHOE_RIGHT_TYPE
+      : Number(finalType) === SHOE_RIGHT_TYPE
       ? "right_shoe"
       : null);
 
@@ -308,13 +321,82 @@ function mapBundleChildRow(r) {
     creator_name: r.creator_name || "",
     creator_id: r.creator_id,
     creator_type: r.creator_type || "",
-    asset_type_id: finalAssetType,
+    asset_type_id: finalType,
     asset_type_name: r.asset_type_name || "",
 
     thumbnail_url: `rbxthumb://type=Asset&id=${r.asset_id}&w=150&h=150`,
     thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${r.asset_id}&w=150&h=150`,
     thumbnail_raw_url: r.thumbnail_url || "",
     role,
+    creator_avatar_url: buildCreatorAvatar(r.creator_type, r.creator_id),
+  };
+}
+
+async function fetchBundleChildren(bundleId) {
+  const res = await pool.query(
+    `
+    SELECT
+      l.bundle_id, l.asset_id, l.role, l.asset_type_id AS link_asset_type_id, l.sort_order,
+      i.name, i.description, i.creator_name, i.creator_id, i.creator_type, i.item_type,
+      i.asset_type_id, i.asset_type_name, i.thumbnail_url
+    FROM public.bundle_asset_links l
+    LEFT JOIN public.catalog_items i ON i.asset_id = l.asset_id
+    WHERE l.bundle_id = $1
+    ORDER BY l.sort_order ASC, l.asset_id ASC
+    `,
+    [bundleId]
+  );
+  return res.rows.map(mapBundleChildRow);
+}
+
+async function patchMissingShoeSide(bundleItem, bundleName, creatorId, neededType) {
+  const base = normalizeBundleBaseTitle(bundleName);
+  if (!base) return bundleItem;
+
+  const params = [neededType];
+  let where = `WHERE asset_type_id = $1`;
+
+  if (creatorId != null) {
+    params.push(creatorId);
+    where += ` AND creator_id = $${params.length}`;
+  }
+
+  params.push(120);
+
+  const res = await pool.query(
+    `
+    SELECT asset_id, name, creator_name, creator_id, creator_type, item_type, asset_type_id, asset_type_name, thumbnail_url
+    FROM public.catalog_items
+    ${where}
+    ORDER BY updated_at DESC, asset_id DESC
+    LIMIT $${params.length}
+    `,
+    params
+  );
+
+  const exact = res.rows.find((r) => normalizeBundleBaseTitle(r.name) === base);
+  const pick = exact || res.rows[0] || null;
+  if (!pick) return bundleItem;
+
+  return {
+    asset_id: pick.asset_id,
+    detail_kind: "asset",
+    is_bundle_parent: false,
+
+    name: pick.name || `Asset ${pick.asset_id}`,
+    item_type: pick.item_type || "",
+    description: "",
+    creator_name: pick.creator_name || "",
+    creator_id: pick.creator_id,
+    creator_type: pick.creator_type || "",
+    asset_type_id: pick.asset_type_id,
+    asset_type_name: pick.asset_type_name || "",
+
+    thumbnail_url: `rbxthumb://type=Asset&id=${pick.asset_id}&w=150&h=150`,
+    thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${pick.asset_id}&w=150&h=150`,
+    thumbnail_raw_url: pick.thumbnail_url || "",
+    role: neededType === SHOE_LEFT_TYPE ? "left_shoe" : "right_shoe",
+    creator_avatar_url: buildCreatorAvatar(pick.creator_type, pick.creator_id),
   };
 }
 
@@ -402,7 +484,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v21:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v22:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -421,7 +503,7 @@ app.get("/catalog/search", async (req, reply) => {
 
       params.push(limit, offset);
 
-      const { rows } = await pool.query(
+      const res = await pool.query(
         `
         SELECT
           bundle_id, name, description, creator_name, creator_id, creator_type,
@@ -435,7 +517,7 @@ app.get("/catalog/search", async (req, reply) => {
         params
       );
 
-      const items = rows.map(mapBundleRow);
+      const items = res.rows.map(mapBundleRow);
       const response = {
         items,
         nextOffset: items.length === limit ? offset + limit : null,
@@ -452,7 +534,7 @@ app.get("/catalog/search", async (req, reply) => {
     const { where, orderSql } = buildItemWhereAndOrder(spec, q, params);
     params.push(limit, offset);
 
-    const { rows } = await pool.query(
+    const res = await pool.query(
       `
       SELECT
         i.asset_id, i.name, i.category, i.item_type, i.asset_type_id, i.asset_type_name,
@@ -467,7 +549,7 @@ app.get("/catalog/search", async (req, reply) => {
       params
     );
 
-    const items = rows.map(mapItemRow);
+    const items = res.rows.map(mapItemRow);
     const response = {
       items,
       nextOffset: items.length === limit ? offset + limit : null,
@@ -497,7 +579,7 @@ app.get("/catalog/item/:id", async (req, reply) => {
     }
 
     if (kind === "bundle") {
-      const { rows } = await pool.query(
+      const bundleRes = await pool.query(
         `
         SELECT
           bundle_id, name, description, creator_name, creator_id, creator_type,
@@ -509,28 +591,36 @@ app.get("/catalog/item/:id", async (req, reply) => {
         [id]
       );
 
-      if (rows.length === 0) {
+      if (bundleRes.rows.length === 0) {
         return reply.code(404).send({ error: "bundle_not_found" });
       }
 
-      const item = mapBundleRow(rows[0]);
-      const linkRows = await pool.query(
-        `
-        SELECT
-          l.bundle_id, l.asset_id, l.role, l.asset_type_id AS link_asset_type_id, l.sort_order,
-          i.name, i.description, i.creator_name, i.creator_id, i.creator_type, i.item_type,
-          i.asset_type_id, i.asset_type_name, i.thumbnail_url
-        FROM public.bundle_asset_links l
-        LEFT JOIN public.catalog_items i ON i.asset_id = l.asset_id
-        WHERE l.bundle_id = $1
-        ORDER BY l.sort_order ASC, l.asset_id ASC
-        `,
-        [id]
-      );
+      const bundleRow = bundleRes.rows[0];
+      let bundleItems = await fetchBundleChildren(id);
+
+      let left = bundleItems.find((x) => Number(x.asset_type_id) === SHOE_LEFT_TYPE);
+      let right = bundleItems.find((x) => Number(x.asset_type_id) === SHOE_RIGHT_TYPE);
+
+      if (!left) {
+        const patched = await patchMissingShoeSide(null, bundleRow.name, bundleRow.creator_id, SHOE_LEFT_TYPE);
+        if (patched) bundleItems.push(patched);
+      }
+      if (!right) {
+        const patched = await patchMissingShoeSide(null, bundleRow.name, bundleRow.creator_id, SHOE_RIGHT_TYPE);
+        if (patched) bundleItems.push(patched);
+      }
+
+      // Stable order: left first, right second, then rest
+      bundleItems.sort((a, b) => {
+        const ra = a.role === "left_shoe" ? 0 : a.role === "right_shoe" ? 1 : 2;
+        const rb = b.role === "left_shoe" ? 0 : b.role === "right_shoe" ? 1 : 2;
+        if (ra !== rb) return ra - rb;
+        return Number(a.asset_id) - Number(b.asset_id);
+      });
 
       return {
-        item,
-        bundle_items: linkRows.rows.map(mapBundleChildRow),
+        item: mapBundleRow(bundleRow),
+        bundle_items: bundleItems,
         detail_mode: "bundle_parent",
         can_wear: true,
         can_purchase: true,
@@ -538,7 +628,7 @@ app.get("/catalog/item/:id", async (req, reply) => {
       };
     }
 
-    const { rows } = await pool.query(
+    const assetRes = await pool.query(
       `
       SELECT
         asset_id, name, category, item_type, asset_type_id, asset_type_name,
@@ -551,11 +641,11 @@ app.get("/catalog/item/:id", async (req, reply) => {
       [id]
     );
 
-    if (rows.length === 0) {
+    if (assetRes.rows.length === 0) {
       return reply.code(404).send({ error: "item_not_found" });
     }
 
-    const item = mapItemRow(rows[0]);
+    const item = mapItemRow(assetRes.rows[0]);
     const t = Number(item.asset_type_id);
 
     if (t === SHOE_LEFT_TYPE || t === SHOE_RIGHT_TYPE) {
