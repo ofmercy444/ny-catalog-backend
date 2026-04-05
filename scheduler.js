@@ -1,8 +1,8 @@
 require("dotenv").config();
 const { spawn } = require("child_process");
 
-const LOOP_DELAY_MS = Number(process.env.LOOP_DELAY_MS || 3000);
-const FAILURE_BACKOFF_MS = Number(process.env.FAILURE_BACKOFF_MS || 30000);
+const LOOP_DELAY_MS = Number(process.env.LOOP_DELAY_MS || 1200000); // 20 min
+const FAILURE_BACKOFF_MS = Number(process.env.FAILURE_BACKOFF_MS || 900000); // 15 min
 
 let stopping = false;
 
@@ -42,9 +42,9 @@ async function main() {
     if (stopping) break;
 
     if (ok) {
-      await sleep(LOOP_DELAY_MS); // re-crawl almost immediately
+      await sleep(LOOP_DELAY_MS);
     } else {
-      await sleep(FAILURE_BACKOFF_MS); // avoid crash loops
+      await sleep(FAILURE_BACKOFF_MS);
     }
   }
   console.log("[scheduler] loop stopped");
