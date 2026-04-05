@@ -16,11 +16,9 @@ const pool = new Pool({
 const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
 const PORT = Number(process.env.PORT || 3000);
 
-// Canonical Roblox type ids
 const CLASSIC_TSHIRT_TYPE = 2;
 const CLASSIC_SHIRT_TYPE = 11;
 const CLASSIC_PANTS_TYPE = 12;
-
 const SHOE_LEFT_TYPE = 70;
 const SHOE_RIGHT_TYPE = 71;
 
@@ -39,7 +37,6 @@ const SUBTAB_ALIASES = {
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
-
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -66,23 +63,11 @@ function normalizeTabKey(raw) {
   return SUBTAB_ALIASES[cleaned] || SUBTAB_ALIASES[compact] || "all";
 }
 
-function normalizeBundleBaseTitle(name) {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/\((left|right)\)/g, "")
-    .replace(/\b(left|right)\b/g, "")
-    .replace(/[|:–—-]+\s*(left|right)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function getSubtabSpec(subtab) {
-  // Strict classic tabs
   if (subtab === "classic_shirts") return { mode: "classic", allowedTypes: [CLASSIC_SHIRT_TYPE] };
   if (subtab === "classic_pants") return { mode: "classic", allowedTypes: [CLASSIC_PANTS_TYPE] };
   if (subtab === "classic_t_shirts") return { mode: "classic", allowedTypes: [CLASSIC_TSHIRT_TYPE] };
 
-  // Layered-priority tabs
   if (subtab === "shirts") {
     return {
       mode: "layered",
@@ -140,12 +125,10 @@ function getSubtabSpec(subtab) {
     };
   }
 
-  // Shoes browse is bundle-parent based
   if (subtab === "shoes") {
     return { mode: "shoes_bundle_parents" };
   }
 
-  // all strict
   return {
     mode: "all_strict",
     layeredTypes: LAYERED_TYPES,
@@ -212,14 +195,11 @@ async function ensureSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_name_lower ON public.catalog_items((lower(name)));`);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_category ON public.catalog_bundles(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_subcategory ON public.catalog_bundles(subcategory);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_name_lower ON public.catalog_bundles((lower(name)));`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_updated ON public.catalog_bundles(updated_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_name_lower ON public.catalog_bundles((lower(name)));`);
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_bundle_id ON public.bundle_asset_links(bundle_id);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_asset_id ON public.bundle_asset_links(asset_id);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_asset_type ON public.bundle_asset_links(asset_type_id);`);
 }
 
 let schemaReady = false;
@@ -268,7 +248,7 @@ function mapItemRow(row) {
 
 function mapBundleRow(row) {
   return {
-    asset_id: row.bundle_id, // client still uses asset_id as primary id
+    asset_id: row.bundle_id,
     bundle_id: row.bundle_id,
     detail_kind: "bundle",
     is_bundle_parent: true,
@@ -307,67 +287,39 @@ function mapBundleRow(row) {
   };
 }
 
-async function getBundleItems(bundleId) {
-  const { rows } = await pool.query(
-    `
-    SELECT
-      l.bundle_id,
-      l.asset_id,
-      l.role,
-      l.asset_type_id AS link_asset_type_id,
-      l.sort_order,
-      i.name,
-      i.description,
-      i.creator_name,
-      i.creator_id,
-      i.creator_type,
-      i.item_type,
-      i.asset_type_id,
-      i.asset_type_name,
-      i.thumbnail_url,
-      i.updated_at
-    FROM public.bundle_asset_links l
-    LEFT JOIN public.catalog_items i ON i.asset_id = l.asset_id
-    WHERE l.bundle_id = $1
-    ORDER BY l.sort_order ASC, l.asset_id ASC
-    `,
-    [bundleId]
-  );
+function mapBundleChildRow(r) {
+  const finalAssetType = r.asset_type_id != null ? r.asset_type_id : r.link_asset_type_id;
+  const role =
+    r.role ||
+    (Number(finalAssetType) === SHOE_LEFT_TYPE
+      ? "left_shoe"
+      : Number(finalAssetType) === SHOE_RIGHT_TYPE
+      ? "right_shoe"
+      : null);
 
-  return rows.map((r) => {
-    const finalAssetType = r.asset_type_id != null ? r.asset_type_id : r.link_asset_type_id;
-    const role =
-      r.role ||
-      (Number(finalAssetType) === SHOE_LEFT_TYPE
-        ? "left_shoe"
-        : Number(finalAssetType) === SHOE_RIGHT_TYPE
-        ? "right_shoe"
-        : null);
+  return {
+    asset_id: r.asset_id,
+    detail_kind: "asset",
+    is_bundle_parent: false,
 
-    return {
-      asset_id: r.asset_id,
-      detail_kind: "asset",
-      is_bundle_parent: false,
+    name: r.name || `Asset ${r.asset_id}`,
+    item_type: r.item_type || "",
+    description: r.description || "",
+    creator_name: r.creator_name || "",
+    creator_id: r.creator_id,
+    creator_type: r.creator_type || "",
+    asset_type_id: finalAssetType,
+    asset_type_name: r.asset_type_name || "",
 
-      name: r.name || ("Asset " + String(r.asset_id)),
-      item_type: r.item_type || "",
-      description: r.description || "",
-      creator_name: r.creator_name || "",
-      creator_id: r.creator_id,
-      creator_type: r.creator_type || "",
-      asset_type_id: finalAssetType,
-      asset_type_name: r.asset_type_name || "",
-
-      thumbnail_url: `rbxthumb://type=Asset&id=${r.asset_id}&w=150&h=150`,
-      thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${r.asset_id}&w=150&h=150`,
-      thumbnail_raw_url: r.thumbnail_url || "",
-      role,
-    };
-  });
+    thumbnail_url: `rbxthumb://type=Asset&id=${r.asset_id}&w=150&h=150`,
+    thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${r.asset_id}&w=150&h=150`,
+    thumbnail_raw_url: r.thumbnail_url || "",
+    role,
+  };
 }
 
-function buildWhereAndOrder(spec, baseCategoryParamIdx, q, params) {
-  let where = `WHERE lower(i.category) = $${baseCategoryParamIdx}`;
+function buildItemWhereAndOrder(spec, q, params) {
+  let where = "WHERE lower(i.category) = $1";
   let orderSql = "i.updated_at DESC, i.asset_id DESC";
 
   if (q.length > 0) {
@@ -381,6 +333,7 @@ function buildWhereAndOrder(spec, baseCategoryParamIdx, q, params) {
   } else if (spec.mode === "all_strict") {
     const layeredIdx = params.length + 1;
     params.push(spec.layeredTypes);
+
     const classicIdx = params.length + 1;
     params.push(spec.classicTypes);
 
@@ -449,7 +402,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v20:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v21:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -457,39 +410,29 @@ app.get("/catalog/search", async (req, reply) => {
 
     const spec = getSubtabSpec(subtab);
 
-    // Shoes browse = bundle parents
     if (spec.mode === "shoes_bundle_parents") {
-      const bundleParams = [category];
+      const params = [category];
       let where = "WHERE lower(category) = $1 AND lower(subcategory) = 'shoes'";
 
       if (q.length > 0) {
-        where += ` AND lower(coalesce(name,'')) LIKE $${bundleParams.length + 1}`;
-        bundleParams.push(`%${q}%`);
+        where += ` AND lower(coalesce(name,'')) LIKE $${params.length + 1}`;
+        params.push(`%${q}%`);
       }
 
-      bundleParams.push(limit, offset);
+      params.push(limit, offset);
 
       const { rows } = await pool.query(
         `
         SELECT
-          bundle_id,
-          name,
-          description,
-          creator_name,
-          creator_id,
-          creator_type,
-          bundle_type,
-          category,
-          subcategory,
-          thumbnail_url,
-          updated_at
+          bundle_id, name, description, creator_name, creator_id, creator_type,
+          bundle_type, category, subcategory, thumbnail_url, updated_at
         FROM public.catalog_bundles
         ${where}
         ORDER BY updated_at DESC, bundle_id DESC
-        LIMIT $${bundleParams.length - 1}
-        OFFSET $${bundleParams.length}
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}
         `,
-        bundleParams
+        params
       );
 
       const items = rows.map(mapBundleRow);
@@ -505,40 +448,26 @@ app.get("/catalog/search", async (req, reply) => {
       return response;
     }
 
-    // Regular item browse
     const params = [category];
-    const { where, orderSql } = buildWhereAndOrder(spec, 1, q, params);
-
+    const { where, orderSql } = buildItemWhereAndOrder(spec, q, params);
     params.push(limit, offset);
 
-    const sql = `
+    const { rows } = await pool.query(
+      `
       SELECT
-        i.asset_id,
-        i.name,
-        i.category,
-        i.item_type,
-        i.asset_type_id,
-        i.asset_type_name,
-        i.creator_id,
-        i.creator_name,
-        i.creator_type,
-        i.description,
-        i.thumbnail_url,
-        i.is_offsale,
-        i.is_limited,
-        i.is_limited_unique,
-        i.price_robux,
-        i.updated_at
+        i.asset_id, i.name, i.category, i.item_type, i.asset_type_id, i.asset_type_name,
+        i.creator_id, i.creator_name, i.creator_type, i.description, i.thumbnail_url,
+        i.is_offsale, i.is_limited, i.is_limited_unique, i.price_robux, i.updated_at
       FROM public.catalog_items i
       ${where}
       ORDER BY ${orderSql}
       LIMIT $${params.length - 1}
-      OFFSET $${params.length};
-    `;
+      OFFSET $${params.length}
+      `,
+      params
+    );
 
-    const { rows } = await pool.query(sql, params);
     const items = rows.map(mapItemRow);
-
     const response = {
       items,
       nextOffset: items.length === limit ? offset + limit : null,
@@ -571,17 +500,8 @@ app.get("/catalog/item/:id", async (req, reply) => {
       const { rows } = await pool.query(
         `
         SELECT
-          bundle_id,
-          name,
-          description,
-          creator_name,
-          creator_id,
-          creator_type,
-          bundle_type,
-          category,
-          subcategory,
-          thumbnail_url,
-          updated_at
+          bundle_id, name, description, creator_name, creator_id, creator_type,
+          bundle_type, category, subcategory, thumbnail_url, updated_at
         FROM public.catalog_bundles
         WHERE bundle_id = $1
         LIMIT 1
@@ -594,11 +514,23 @@ app.get("/catalog/item/:id", async (req, reply) => {
       }
 
       const item = mapBundleRow(rows[0]);
-      const bundle_items = await getBundleItems(id);
+      const linkRows = await pool.query(
+        `
+        SELECT
+          l.bundle_id, l.asset_id, l.role, l.asset_type_id AS link_asset_type_id, l.sort_order,
+          i.name, i.description, i.creator_name, i.creator_id, i.creator_type, i.item_type,
+          i.asset_type_id, i.asset_type_name, i.thumbnail_url
+        FROM public.bundle_asset_links l
+        LEFT JOIN public.catalog_items i ON i.asset_id = l.asset_id
+        WHERE l.bundle_id = $1
+        ORDER BY l.sort_order ASC, l.asset_id ASC
+        `,
+        [id]
+      );
 
       return {
         item,
-        bundle_items,
+        bundle_items: linkRows.rows.map(mapBundleChildRow),
         detail_mode: "bundle_parent",
         can_wear: true,
         can_purchase: true,
@@ -606,7 +538,6 @@ app.get("/catalog/item/:id", async (req, reply) => {
       };
     }
 
-    // asset detail
     const { rows } = await pool.query(
       `
       SELECT
@@ -627,7 +558,6 @@ app.get("/catalog/item/:id", async (req, reply) => {
     const item = mapItemRow(rows[0]);
     const t = Number(item.asset_type_id);
 
-    // child shoes = wear-only detail
     if (t === SHOE_LEFT_TYPE || t === SHOE_RIGHT_TYPE) {
       return {
         item,

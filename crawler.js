@@ -10,7 +10,7 @@ const pool = new Pool({
 });
 
 const CLOTHING_CATEGORY = 3;
-const ALT_DISCOVERY_CATEGORY = 11; // helps discover shoe-like content in alternative paths
+const ALT_DISCOVERY_CATEGORY = 11;
 
 const PAGE_LIMIT = 30;
 const MAX_PAGES_PER_PASS = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 3);
@@ -73,7 +73,7 @@ async function fetchJsonWithRetry(url, tries = 5) {
 
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "ny-catalog-backend/2.0",
+        "User-Agent": "ny-catalog-backend/2.1",
         Accept: "application/json",
       },
     });
@@ -103,7 +103,7 @@ async function fetchAssetDetailsWithRetry(assetId, tries = 4) {
 
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "ny-catalog-backend/2.0",
+        "User-Agent": "ny-catalog-backend/2.1",
         Accept: "application/json",
       },
     });
@@ -131,7 +131,7 @@ async function fetchBundleDetailsWithRetry(bundleId, tries = 4) {
 
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "ny-catalog-backend/2.0",
+        "User-Agent": "ny-catalog-backend/2.1",
         Accept: "application/json",
       },
     });
@@ -313,7 +313,6 @@ async function ensureSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
-
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_subcategory ON public.catalog_bundles(subcategory);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_bundle_id ON public.bundle_asset_links(bundle_id);`);
 }
@@ -473,7 +472,7 @@ async function upsertBundleLink(link) {
   );
 }
 
-async function crawlPass(tabKey, passConfig) {
+async function crawlItemPass(tabKey, passConfig) {
   let cursor = null;
   let pages = 0;
   let upserts = 0;
@@ -496,7 +495,6 @@ async function crawlPass(tabKey, passConfig) {
     for (const item of items) {
       await upsertItem(item);
       upserts += 1;
-
       const t = Number(item.asset_type_id);
       if (t >= 64 && t <= 72) layeredMapped += 1;
     }
@@ -512,7 +510,7 @@ async function crawlPass(tabKey, passConfig) {
   );
 }
 
-async function crawlShoeBundleParents() {
+async function crawlShoeBundles() {
   const seenBundles = new Set();
   let discovered = 0;
   let linkedAssets = 0;
@@ -538,15 +536,14 @@ async function crawlShoeBundleParents() {
           if (!Number.isFinite(bundleId)) continue;
           if (seenBundles.has(bundleId)) continue;
 
-          const looksBundle = isBundleLike(raw);
-          const looksShoe = isShoeLikeTitle(raw.name || "");
-          if (!looksBundle && !looksShoe) continue;
+          if (!isBundleLike(raw)) continue;
+          if (!isShoeLikeTitle(raw.name || "")) continue;
 
           seenBundles.add(bundleId);
           discovered += 1;
 
           const creator = raw.creator || {};
-          const bundleRow = {
+          await upsertBundle({
             bundle_id: bundleId,
             name: raw.name || `Bundle ${bundleId}`,
             description: raw.description || "",
@@ -557,9 +554,7 @@ async function crawlShoeBundleParents() {
             category: "clothing",
             subcategory: "shoes",
             thumbnail_url: `rbxthumb://type=BundleThumbnail&id=${bundleId}&w=420&h=420`,
-          };
-
-          await upsertBundle(bundleRow);
+          });
 
           const details = await fetchBundleDetailsWithRetry(bundleId);
           const detailItems = Array.isArray(details?.items) ? details.items : [];
@@ -599,7 +594,6 @@ async function crawlShoeBundleParents() {
 
             sortOrder += 1;
             linkedAssets += 1;
-
             await sleep(ASSET_META_DELAY_MS);
           }
 
@@ -609,7 +603,6 @@ async function crawlShoeBundleParents() {
         pages += 1;
         cursor = json.nextPageCursor || null;
         if (!cursor) break;
-
         await sleep(DELAY_MS);
       }
     }
@@ -627,12 +620,12 @@ async function main() {
 
     for (const tab of CRAWL_PLAN) {
       for (const pass of tab.passes) {
-        await crawlPass(tab.key, pass);
+        await crawlItemPass(tab.key, pass);
         await sleep(DELAY_MS);
       }
     }
 
-    await crawlShoeBundleParents();
+    await crawlShoeBundles();
 
     console.log("Crawl complete");
     process.exit(0);
