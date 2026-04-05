@@ -21,7 +21,11 @@ const CLASSIC_TSHIRT_TYPE = 2;
 const CLASSIC_SHIRT_TYPE = 11;
 const CLASSIC_PANTS_TYPE = 12;
 
+const SHOE_LEFT_TYPE = 70;
+const SHOE_RIGHT_TYPE = 71;
+
 const LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 70, 71, 72];
+const CLASSIC_CLOTHING_TYPES = [CLASSIC_TSHIRT_TYPE, CLASSIC_SHIRT_TYPE, CLASSIC_PANTS_TYPE];
 
 const SUBTAB_ALIASES = {
   all: "all",
@@ -62,32 +66,33 @@ function normalizeTabKey(raw) {
   return SUBTAB_ALIASES[cleaned] || SUBTAB_ALIASES[compact] || "all";
 }
 
+function normalizeBundleBaseTitle(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/\((left|right)\)/g, "")
+    .replace(/\b(left|right)\b/g, "")
+    .replace(/[|:–—-]+\s*(left|right)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function getSubtabSpec(subtab) {
   // Strict classic tabs
   if (subtab === "classic_shirts") {
-    return {
-      mode: "classic",
-      allowedTypes: [CLASSIC_SHIRT_TYPE],
-    };
+    return { mode: "classic", allowedTypes: [CLASSIC_SHIRT_TYPE] };
   }
   if (subtab === "classic_pants") {
-    return {
-      mode: "classic",
-      allowedTypes: [CLASSIC_PANTS_TYPE],
-    };
+    return { mode: "classic", allowedTypes: [CLASSIC_PANTS_TYPE] };
   }
   if (subtab === "classic_t_shirts") {
-    return {
-      mode: "classic",
-      allowedTypes: [CLASSIC_TSHIRT_TYPE],
-    };
+    return { mode: "classic", allowedTypes: [CLASSIC_TSHIRT_TYPE] };
   }
 
   // Layered-priority tabs
   if (subtab === "shirts") {
     return {
       mode: "layered",
-      layeredTypes: [65], // ShirtAccessory
+      layeredTypes: [65],
       fallbackClassicTypes: [CLASSIC_SHIRT_TYPE, CLASSIC_TSHIRT_TYPE],
       fallbackTitleRegex: "(shirt|top|tee|t-shirt|t shirt)",
     };
@@ -95,7 +100,7 @@ function getSubtabSpec(subtab) {
   if (subtab === "jackets") {
     return {
       mode: "layered",
-      layeredTypes: [67], // JacketAccessory
+      layeredTypes: [67],
       fallbackClassicTypes: [CLASSIC_SHIRT_TYPE, CLASSIC_TSHIRT_TYPE],
       fallbackTitleRegex: "(jacket|coat|hoodie|zip[ -]?up)",
     };
@@ -103,7 +108,7 @@ function getSubtabSpec(subtab) {
   if (subtab === "sweaters") {
     return {
       mode: "layered",
-      layeredTypes: [68], // SweaterAccessory
+      layeredTypes: [68],
       fallbackClassicTypes: [CLASSIC_SHIRT_TYPE, CLASSIC_TSHIRT_TYPE],
       fallbackTitleRegex: "(sweater|cardigan|knit)",
     };
@@ -111,7 +116,7 @@ function getSubtabSpec(subtab) {
   if (subtab === "t_shirts") {
     return {
       mode: "layered",
-      layeredTypes: [64], // TShirtAccessory
+      layeredTypes: [64],
       fallbackClassicTypes: [CLASSIC_TSHIRT_TYPE, CLASSIC_SHIRT_TYPE],
       fallbackTitleRegex: "(t-shirt|t shirt|tee)",
     };
@@ -119,7 +124,7 @@ function getSubtabSpec(subtab) {
   if (subtab === "pants") {
     return {
       mode: "layered",
-      layeredTypes: [66], // PantsAccessory
+      layeredTypes: [66],
       fallbackClassicTypes: [CLASSIC_PANTS_TYPE],
       fallbackTitleRegex: "(pants|jeans|trousers|sweatpants|cargo)",
     };
@@ -127,7 +132,7 @@ function getSubtabSpec(subtab) {
   if (subtab === "shorts") {
     return {
       mode: "layered",
-      layeredTypes: [69], // ShortsAccessory
+      layeredTypes: [69],
       fallbackClassicTypes: [CLASSIC_PANTS_TYPE],
       fallbackTitleRegex: "(shorts?)",
     };
@@ -135,7 +140,7 @@ function getSubtabSpec(subtab) {
   if (subtab === "dresses_skirts") {
     return {
       mode: "layered",
-      layeredTypes: [72], // DressSkirtAccessory
+      layeredTypes: [72],
       fallbackClassicTypes: [CLASSIC_SHIRT_TYPE, CLASSIC_PANTS_TYPE, CLASSIC_TSHIRT_TYPE],
       fallbackTitleRegex: "(dress|skirt|gown)",
     };
@@ -143,14 +148,18 @@ function getSubtabSpec(subtab) {
   if (subtab === "shoes") {
     return {
       mode: "layered",
-      layeredTypes: [70, 71], // LeftShoe/RightShoe
-      fallbackClassicTypes: [], // no true classic shoes equivalent
+      layeredTypes: [SHOE_LEFT_TYPE, SHOE_RIGHT_TYPE],
+      fallbackClassicTypes: [],
       fallbackTitleRegex: "(shoe|shoes|sneaker|sneakers|boot|boots|heel|heels)",
     };
   }
 
-  // "all"
-  return { mode: "all" };
+  // "all" strict: layered first, classic after
+  return {
+    mode: "all_strict",
+    layeredTypes: LAYERED_TYPES,
+    classicTypes: CLASSIC_CLOTHING_TYPES,
+  };
 }
 
 async function ensureSchema() {
@@ -191,6 +200,125 @@ async function ensureSchemaOnce() {
   schemaReady = true;
 }
 
+function mapItemRow(row) {
+  return {
+    asset_id: row.asset_id,
+    name: row.name,
+    category: row.category,
+    item_type: row.item_type,
+    asset_type_id: row.asset_type_id,
+    asset_type_name: row.asset_type_name,
+    creator_id: row.creator_id,
+    creator_name: row.creator_name,
+    creator_type: row.creator_type,
+    description: row.description,
+    thumbnail_url: `rbxthumb://type=Asset&id=${row.asset_id}&w=420&h=420`,
+    thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${row.asset_id}&w=420&h=420`,
+    thumbnail_raw_url: row.thumbnail_url || "",
+    is_offsale: row.is_offsale,
+    is_limited: row.is_limited,
+    is_limited_unique: row.is_limited_unique,
+    price_robux: row.price_robux,
+    updated_at: row.updated_at,
+    is_layered: LAYERED_TYPES.includes(Number(row.asset_type_id)),
+    creator_avatar_url:
+      String(row.creator_type || "").toLowerCase() === "group" && row.creator_id != null
+        ? `rbxthumb://type=GroupIcon&id=${row.creator_id}&w=150&h=150`
+        : row.creator_id != null
+        ? `rbxthumb://type=AvatarHeadShot&id=${row.creator_id}&w=150&h=150`
+        : "rbxasset://textures/ui/GuiImagePlaceholder.png",
+  };
+}
+
+async function getShoeBundleItems(baseItem) {
+  if (![SHOE_LEFT_TYPE, SHOE_RIGHT_TYPE].includes(Number(baseItem.asset_type_id))) {
+    return [];
+  }
+
+  const baseName = normalizeBundleBaseTitle(baseItem.name);
+  const creatorId = baseItem.creator_id == null ? null : Number(baseItem.creator_id);
+
+  const params = [];
+  let where = `
+    WHERE lower(category) = 'clothing'
+      AND asset_type_id IN (${SHOE_LEFT_TYPE}, ${SHOE_RIGHT_TYPE})
+  `;
+
+  if (creatorId != null) {
+    params.push(creatorId);
+    where += ` AND creator_id = $${params.length}`;
+  }
+
+  params.push(500);
+
+  const { rows } = await pool.query(
+    `
+    SELECT
+      asset_id, name, category, item_type, asset_type_id, asset_type_name,
+      creator_id, creator_name, creator_type, description, thumbnail_url,
+      is_offsale, is_limited, is_limited_unique, price_robux, updated_at
+    FROM public.catalog_items
+    ${where}
+    ORDER BY updated_at DESC, asset_id DESC
+    LIMIT $${params.length}
+    `,
+    params
+  );
+
+  const exact = rows.filter((r) => normalizeBundleBaseTitle(r.name) === baseName);
+  const poolRows =
+    exact.length > 0
+      ? exact
+      : rows.filter((r) => {
+          const n = normalizeBundleBaseTitle(r.name);
+          return n && (n.includes(baseName) || baseName.includes(n));
+        });
+
+  let left = null;
+  let right = null;
+
+  for (const r of poolRows) {
+    if (!left && Number(r.asset_type_id) === SHOE_LEFT_TYPE) left = r;
+    if (!right && Number(r.asset_type_id) === SHOE_RIGHT_TYPE) right = r;
+    if (left && right) break;
+  }
+
+  if (!left && Number(baseItem.asset_type_id) === SHOE_LEFT_TYPE) {
+    left = baseItem;
+  }
+  if (!right && Number(baseItem.asset_type_id) === SHOE_RIGHT_TYPE) {
+    right = baseItem;
+  }
+
+  const out = [];
+  if (left) {
+    out.push({
+      asset_id: left.asset_id,
+      name: left.name,
+      asset_type_id: left.asset_type_id,
+      asset_type_name: left.asset_type_name,
+      role: "left_shoe",
+      thumbnail_url: `rbxthumb://type=Asset&id=${left.asset_id}&w=150&h=150`,
+      thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${left.asset_id}&w=150&h=150`,
+      thumbnail_raw_url: left.thumbnail_url || "",
+    });
+  }
+  if (right) {
+    out.push({
+      asset_id: right.asset_id,
+      name: right.name,
+      asset_type_id: right.asset_type_id,
+      asset_type_name: right.asset_type_name,
+      role: "right_shoe",
+      thumbnail_url: `rbxthumb://type=Asset&id=${right.asset_id}&w=150&h=150`,
+      thumbnail_bundle_url: `rbxthumb://type=BundleThumbnail&id=${right.asset_id}&w=150&h=150`,
+      thumbnail_raw_url: right.thumbnail_url || "",
+    });
+  }
+
+  return out;
+}
+
 app.get("/", async () => ({ ok: true, service: "catalog-backend" }));
 app.get("/health", async () => ({ ok: true }));
 
@@ -204,8 +332,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    // cache namespace bump
-    const cacheKey = `search:v11:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v14:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -216,7 +343,7 @@ app.get("/catalog/search", async (req, reply) => {
     const params = [category];
     let where = "WHERE lower(i.category) = $1";
 
-    // title-only search (name only)
+    // title-only search
     if (q.length > 0) {
       where += ` AND lower(coalesce(i.name,'')) LIKE $${params.length + 1}`;
       params.push(`%${q}%`);
@@ -227,9 +354,30 @@ app.get("/catalog/search", async (req, reply) => {
     if (spec.mode === "classic") {
       where += ` AND i.asset_type_id = ANY($${params.length + 1}::int[])`;
       params.push(spec.allowedTypes);
-      // strict classic only, no layered here
+    } else if (spec.mode === "all_strict") {
+      const layeredIdx = params.length + 1;
+      params.push(spec.layeredTypes);
+
+      const classicIdx = params.length + 1;
+      params.push(spec.classicTypes);
+
+      where += `
+        AND (
+          i.asset_type_id = ANY($${layeredIdx}::int[])
+          OR i.asset_type_id = ANY($${classicIdx}::int[])
+        )
+      `;
+
+      orderSql = `
+        CASE
+          WHEN i.asset_type_id = ANY($${layeredIdx}::int[]) THEN 0
+          ELSE 1
+        END,
+        i.updated_at DESC,
+        i.asset_id DESC
+      `;
     } else if (spec.mode === "layered") {
-      const layeredParamIdx = params.length + 1;
+      const layeredIdx = params.length + 1;
       params.push(spec.layeredTypes);
 
       if (spec.fallbackClassicTypes.length > 0) {
@@ -241,7 +389,7 @@ app.get("/catalog/search", async (req, reply) => {
 
         where += `
           AND (
-            i.asset_type_id = ANY($${layeredParamIdx}::int[])
+            i.asset_type_id = ANY($${layeredIdx}::int[])
             OR (
               i.asset_type_id = ANY($${fallbackTypesIdx}::int[])
               AND lower(coalesce(i.name,'')) ~ $${fallbackRegexIdx}
@@ -249,20 +397,17 @@ app.get("/catalog/search", async (req, reply) => {
           )
         `;
       } else {
-        where += ` AND i.asset_type_id = ANY($${layeredParamIdx}::int[])`;
+        where += ` AND i.asset_type_id = ANY($${layeredIdx}::int[])`;
       }
 
-      // layered first, fallback classic after
       orderSql = `
         CASE
-          WHEN i.asset_type_id = ANY($${layeredParamIdx}::int[]) THEN 0
+          WHEN i.asset_type_id = ANY($${layeredIdx}::int[]) THEN 0
           ELSE 1
         END,
         i.updated_at DESC,
         i.asset_id DESC
       `;
-    } else {
-      // mode all: no strict type slicing
     }
 
     params.push(limit, offset);
@@ -279,29 +424,12 @@ app.get("/catalog/search", async (req, reply) => {
         i.creator_name,
         i.creator_type,
         i.description,
-
-        'rbxthumb://type=Asset&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_url,
-        'rbxthumb://type=BundleThumbnail&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_bundle_url,
-        COALESCE(i.thumbnail_url, '') AS thumbnail_raw_url,
-
+        i.thumbnail_url,
         i.is_offsale,
         i.is_limited,
         i.is_limited_unique,
         i.price_robux,
-        i.updated_at,
-
-        CASE
-          WHEN i.asset_type_id = ANY(ARRAY[${LAYERED_TYPES.join(",")} ]::int[]) THEN true
-          ELSE false
-        END AS is_layered,
-
-        CASE
-          WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
-            THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
-          WHEN i.creator_id IS NOT NULL
-            THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
-          ELSE 'rbxasset://textures/ui/GuiImagePlaceholder.png'
-        END AS creator_avatar_url
+        i.updated_at
       FROM public.catalog_items i
       ${where}
       ORDER BY ${orderSql}
@@ -310,10 +438,11 @@ app.get("/catalog/search", async (req, reply) => {
     `;
 
     const { rows } = await pool.query(sql, params);
+    const items = rows.map(mapItemRow);
 
     const response = {
-      items: rows,
-      nextOffset: rows.length === limit ? offset + limit : null,
+      items,
+      nextOffset: items.length === limit ? offset + limit : null,
       subtabKey: subtab,
     };
 
@@ -325,6 +454,42 @@ app.get("/catalog/search", async (req, reply) => {
   } catch (err) {
     req.log.error(err);
     return reply.code(500).send({ error: "catalog_search_failed" });
+  }
+});
+
+app.get("/catalog/item/:assetId", async (req, reply) => {
+  try {
+    await ensureSchemaOnce();
+
+    const assetId = Number(req.params.assetId);
+    if (!Number.isFinite(assetId)) {
+      return reply.code(400).send({ error: "invalid_asset_id" });
+    }
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        asset_id, name, category, item_type, asset_type_id, asset_type_name,
+        creator_id, creator_name, creator_type, description, thumbnail_url,
+        is_offsale, is_limited, is_limited_unique, price_robux, updated_at
+      FROM public.catalog_items
+      WHERE asset_id = $1
+      LIMIT 1
+      `,
+      [assetId]
+    );
+
+    if (rows.length === 0) {
+      return reply.code(404).send({ error: "item_not_found" });
+    }
+
+    const item = mapItemRow(rows[0]);
+    const bundle_items = await getShoeBundleItems(item);
+
+    return { item, bundle_items };
+  } catch (err) {
+    req.log.error(err);
+    return reply.code(500).send({ error: "catalog_item_failed" });
   }
 });
 

@@ -12,48 +12,43 @@ const pool = new Pool({
 const CATEGORY = 3;
 const PAGE_LIMIT = 30;
 const MAX_PAGES_PER_PASS = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 3);
-const SHOES_MAX_PAGES_PER_PASS = Number(
-  process.env.CRAWL_SHOES_PAGES_PER_PASS || Math.max(MAX_PAGES_PER_PASS, 6)
-);
+const SHOES_PAGES_PER_PASS = Number(process.env.CRAWL_SHOES_PAGES_PER_SUBTAB || 6);
 
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 2200);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 120);
 const INCLUDE_NOT_FOR_SALE =
   String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-// Stronger shoe crawl coverage to populate type 70/71 faster
-const SHOE_KEYWORDS = [
-  "layered shoes",
-  "3d shoes",
-  "shoe accessory",
-  "left shoe",
-  "right shoe",
-  "sneakers",
-  "boots",
-  "heels",
-  "shoe",
-];
+const SHOE_LEFT_TYPE = 70;
+const SHOE_RIGHT_TYPE = 71;
 
 const CRAWL_PLAN = [
-  { key: "all", passes: [{ keyword: "" }] },
+  { key: "all", passes: [{ keyword: "", intent: "all" }] },
 
-  { key: "classic_shirts", passes: [{ keyword: "classic shirt template" }] },
-  { key: "classic_pants", passes: [{ keyword: "classic pants template" }] },
-  { key: "classic_t_shirts", passes: [{ keyword: "classic t shirt" }] },
+  { key: "classic_shirts", passes: [{ keyword: "classic shirt template", intent: "classic" }] },
+  { key: "classic_pants", passes: [{ keyword: "classic pants template", intent: "classic" }] },
+  { key: "classic_t_shirts", passes: [{ keyword: "classic t shirt", intent: "classic" }] },
 
-  { key: "shirts", passes: [{ keyword: "layered shirt" }, { keyword: "shirt" }] },
-  { key: "jackets", passes: [{ keyword: "layered jacket" }, { keyword: "jacket" }] },
-  { key: "sweaters", passes: [{ keyword: "layered sweater" }, { keyword: "sweater" }] },
-  { key: "t_shirts", passes: [{ keyword: "layered t shirt" }, { keyword: "t shirt" }] },
-  { key: "pants", passes: [{ keyword: "layered pants" }, { keyword: "pants" }] },
-  { key: "shorts", passes: [{ keyword: "layered shorts" }, { keyword: "shorts" }] },
-  { key: "dresses_skirts", passes: [{ keyword: "layered dress skirt" }, { keyword: "dress skirt" }] },
+  { key: "shirts", passes: [{ keyword: "layered shirt", intent: "layered" }, { keyword: "shirt", intent: "fallback" }] },
+  { key: "jackets", passes: [{ keyword: "layered jacket", intent: "layered" }, { keyword: "jacket", intent: "fallback" }] },
+  { key: "sweaters", passes: [{ keyword: "layered sweater", intent: "layered" }, { keyword: "sweater", intent: "fallback" }] },
+  { key: "t_shirts", passes: [{ keyword: "layered t shirt", intent: "layered" }, { keyword: "t shirt", intent: "fallback" }] },
+  { key: "pants", passes: [{ keyword: "layered pants", intent: "layered" }, { keyword: "pants", intent: "fallback" }] },
+  { key: "shorts", passes: [{ keyword: "layered shorts", intent: "layered" }, { keyword: "shorts", intent: "fallback" }] },
+  { key: "dresses_skirts", passes: [{ keyword: "layered dress skirt", intent: "layered" }, { keyword: "dress skirt", intent: "fallback" }] },
 
-  // Shoes receives expanded keyword coverage + more pages/pass.
   {
     key: "shoes",
-    pagesPerPass: SHOES_MAX_PAGES_PER_PASS,
-    passes: SHOE_KEYWORDS.map((keyword) => ({ keyword })),
+    pagesPerPass: SHOES_PAGES_PER_PASS,
+    passes: [
+      { keyword: "layered shoes", intent: "layered" },
+      { keyword: "shoe accessory", intent: "layered" },
+      { keyword: "sneakers", intent: "layered" },
+      { keyword: "heels", intent: "layered" },
+      { keyword: "left shoe", intent: "layered" },
+      { keyword: "right shoe", intent: "layered" },
+      { keyword: "shoes", intent: "fallback" },
+    ],
   },
 ];
 
@@ -77,7 +72,6 @@ function buildUrl({ keyword, cursor }) {
 
 async function fetchJsonWithRetry(url, tries = 5) {
   let attempt = 0;
-
   while (attempt < tries) {
     attempt += 1;
 
@@ -104,7 +98,7 @@ async function fetchJsonWithRetry(url, tries = 5) {
   throw new Error(`HTTP 429 persisted after retries: ${url}`);
 }
 
-async function fetchAssetMetaWithRetry(assetId, tries = 4) {
+async function fetchAssetDetailsWithRetry(assetId, tries = 4) {
   const url = `https://economy.roblox.com/v2/assets/${assetId}/details`;
   let attempt = 0;
 
@@ -118,15 +112,7 @@ async function fetchAssetMetaWithRetry(assetId, tries = 4) {
       },
     });
 
-    if (res.ok) {
-      const json = await res.json();
-      return {
-        asset_type_id: Number(json.AssetTypeId ?? json.assetTypeId ?? null) || null,
-        asset_type_name: String(
-          json.AssetType ?? json.assetType ?? json.AssetTypeName ?? json.assetTypeName ?? ""
-        ),
-      };
-    }
+    if (res.ok) return res.json();
 
     if (res.status === 429) {
       const backoff = 900 * attempt;
@@ -134,43 +120,55 @@ async function fetchAssetMetaWithRetry(assetId, tries = 4) {
       continue;
     }
 
-    return { asset_type_id: null, asset_type_name: "" };
+    return null;
   }
 
-  return { asset_type_id: null, asset_type_name: "" };
+  return null;
 }
 
-async function ensureSchema() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.catalog_items (
-      asset_id BIGINT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      creator_name TEXT,
-      creator_id BIGINT,
-      creator_type TEXT,
-      item_type TEXT,
-      category TEXT DEFAULT 'clothing',
-      thumbnail_url TEXT,
-      is_offsale BOOLEAN DEFAULT FALSE,
-      is_limited BOOLEAN DEFAULT FALSE,
-      is_limited_unique BOOLEAN DEFAULT FALSE,
-      price_robux INTEGER,
-      asset_type_id INTEGER,
-      asset_type_name TEXT,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
+async function fetchBundleDetailsWithRetry(bundleId, tries = 4) {
+  const url = `https://catalog.roblox.com/v1/bundles/${bundleId}/details`;
+  let attempt = 0;
 
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_id INTEGER;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_name TEXT;`);
+  while (attempt < tries) {
+    attempt += 1;
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "ny-catalog-backend/1.0",
+        Accept: "application/json",
+      },
+    });
+
+    if (res.ok) return res.json();
+
+    if (res.status === 429) {
+      const backoff = 900 * attempt;
+      await sleep(backoff);
+      continue;
+    }
+
+    return null;
+  }
+
+  return null;
 }
 
-function normalizeItem(raw) {
+function extractAssetMeta(details) {
+  if (!details) return { asset_type_id: null, asset_type_name: "" };
+  return {
+    asset_type_id: Number(details.AssetTypeId ?? details.assetTypeId ?? null) || null,
+    asset_type_name: String(
+      details.AssetType ??
+        details.assetType ??
+        details.AssetTypeName ??
+        details.assetTypeName ??
+        ""
+    ),
+  };
+}
+
+function normalizeSearchItem(raw) {
   const creator = raw.creator || {};
   const creatorIdRaw =
     creator.id ??
@@ -211,6 +209,70 @@ function normalizeItem(raw) {
     asset_type_id: null,
     asset_type_name: "",
   };
+}
+
+function normalizeEconomyAsset(details) {
+  const creator = details.Creator || details.creator || {};
+  const creatorIdRaw =
+    creator.Id ??
+    creator.id ??
+    details.CreatorTargetId ??
+    details.creatorTargetId ??
+    null;
+
+  const creatorId = Number.isFinite(Number(creatorIdRaw)) ? Number(creatorIdRaw) : null;
+  const assetId = Number(details.AssetId ?? details.assetId ?? details.Id ?? details.id);
+  const meta = extractAssetMeta(details);
+
+  return {
+    asset_id: Number.isFinite(assetId) ? assetId : null,
+    name: String(details.Name ?? details.name ?? "Unknown"),
+    description: String(details.Description ?? details.description ?? ""),
+    creator_name: String(creator.Name ?? creator.name ?? details.CreatorName ?? details.creatorName ?? ""),
+    creator_id: creatorId,
+    creator_type: String(creator.CreatorType ?? creator.creatorType ?? details.CreatorType ?? details.creatorType ?? ""),
+    item_type: String(details.AssetType ?? details.assetType ?? details.AssetTypeName ?? details.assetTypeName ?? ""),
+    category: "clothing",
+    thumbnail_url: "",
+    is_offsale: !(details.IsForSale ?? details.isForSale ?? true),
+    is_limited: Boolean(details.IsLimited ?? details.isLimited ?? false),
+    is_limited_unique: Boolean(details.IsLimitedUnique ?? details.isLimitedUnique ?? false),
+    price_robux: Number.isFinite(Number(details.PriceInRobux ?? details.priceInRobux))
+      ? Number(details.PriceInRobux ?? details.priceInRobux)
+      : null,
+    asset_type_id: meta.asset_type_id,
+    asset_type_name: meta.asset_type_name,
+  };
+}
+
+async function ensureSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.catalog_items (
+      asset_id BIGINT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      creator_name TEXT,
+      creator_id BIGINT,
+      creator_type TEXT,
+      item_type TEXT,
+      category TEXT DEFAULT 'clothing',
+      thumbnail_url TEXT,
+      is_offsale BOOLEAN DEFAULT FALSE,
+      is_limited BOOLEAN DEFAULT FALSE,
+      is_limited_unique BOOLEAN DEFAULT FALSE,
+      price_robux INTEGER,
+      asset_type_id INTEGER,
+      asset_type_name TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_id INTEGER;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_name TEXT;`);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
 }
 
 async function getKnownAssetTypes(assetIds) {
@@ -260,7 +322,8 @@ async function enrichAssetTypes(items) {
       continue;
     }
 
-    const fetched = await fetchAssetMetaWithRetry(item.asset_id);
+    const details = await fetchAssetDetailsWithRetry(item.asset_id);
+    const fetched = extractAssetMeta(details);
     memoryAssetTypeCache.set(key, fetched);
     item.asset_type_id = fetched.asset_type_id;
     item.asset_type_name = fetched.asset_type_name;
@@ -270,6 +333,8 @@ async function enrichAssetTypes(items) {
 }
 
 async function upsertItem(item) {
+  if (!Number.isFinite(item.asset_id)) return;
+
   await pool.query(
     `
     INSERT INTO public.catalog_items (
@@ -317,24 +382,83 @@ async function upsertItem(item) {
   );
 }
 
-async function crawlPass(passConfig, maxPagesForThisPass) {
+function isBundleRow(raw) {
+  const itemType = String(raw.itemType || raw.assetType || raw.assetTypeName || "").toLowerCase();
+  return itemType.includes("bundle");
+}
+
+function extractBundleAssetIds(bundleDetails) {
+  const items = Array.isArray(bundleDetails?.items) ? bundleDetails.items : [];
+  return items
+    .filter((x) => String(x.type || "").toLowerCase() === "asset")
+    .map((x) => Number(x.id))
+    .filter((id) => Number.isFinite(id));
+}
+
+async function expandAndUpsertShoesFromBundle(raw) {
+  const bundleId = Number(raw.id);
+  if (!Number.isFinite(bundleId)) return 0;
+
+  const bundleDetails = await fetchBundleDetailsWithRetry(bundleId);
+  if (!bundleDetails) return 0;
+
+  const childAssetIds = extractBundleAssetIds(bundleDetails);
+  if (childAssetIds.length === 0) return 0;
+
+  let inserted = 0;
+
+  for (const childAssetId of childAssetIds) {
+    const details = await fetchAssetDetailsWithRetry(childAssetId);
+    const meta = extractAssetMeta(details);
+
+    if (![SHOE_LEFT_TYPE, SHOE_RIGHT_TYPE].includes(Number(meta.asset_type_id))) {
+      await sleep(ASSET_META_DELAY_MS);
+      continue;
+    }
+
+    const item = normalizeEconomyAsset(details || {});
+    if (!Number.isFinite(item.asset_id)) {
+      await sleep(ASSET_META_DELAY_MS);
+      continue;
+    }
+
+    await upsertItem(item);
+    inserted += 1;
+    await sleep(ASSET_META_DELAY_MS);
+  }
+
+  return inserted;
+}
+
+async function crawlPass(tabKey, passConfig, pagesPerPass) {
   let cursor = null;
   let pages = 0;
   let upserts = 0;
-  let enriched = 0;
+  let layeredMapped = 0;
+  let shoeBundleChildrenInserted = 0;
 
-  while (pages < maxPagesForThisPass) {
+  while (pages < pagesPerPass) {
     const url = buildUrl({ keyword: passConfig.keyword, cursor });
     const json = await fetchJsonWithRetry(url);
     const rows = Array.isArray(json.data) ? json.data : [];
-    const items = rows.map(normalizeItem).filter((i) => Number.isFinite(i.asset_id));
+    const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
 
     await enrichAssetTypes(items);
 
     for (const item of items) {
       await upsertItem(item);
       upserts += 1;
-      if (item.asset_type_id != null) enriched += 1;
+
+      const t = Number(item.asset_type_id);
+      if (t >= 64 && t <= 72) layeredMapped += 1;
+    }
+
+    if (tabKey === "shoes") {
+      for (const raw of rows) {
+        if (!isBundleRow(raw)) continue;
+        const added = await expandAndUpsertShoesFromBundle(raw);
+        shoeBundleChildrenInserted += added;
+      }
     }
 
     pages += 1;
@@ -345,7 +469,7 @@ async function crawlPass(passConfig, maxPagesForThisPass) {
   }
 
   console.log(
-    `[crawl-pass] keyword="${passConfig.keyword}" pages=${pages}, maxPages=${maxPagesForThisPass}, upserts=${upserts}, enrichedType=${enriched}`
+    `[crawl] ${tabKey} | keyword="${passConfig.keyword}" | intent=${passConfig.intent || "unknown"} | pages=${pages}, upserts=${upserts}, layeredMapped=${layeredMapped}, shoeBundleChildrenInserted=${shoeBundleChildrenInserted}`
   );
 }
 
@@ -357,10 +481,10 @@ async function main() {
     await ensureSchema();
 
     for (const tab of CRAWL_PLAN) {
-      const pagesForTab = Number(tab.pagesPerPass || MAX_PAGES_PER_PASS);
+      const pagesPerPass = Number(tab.pagesPerPass || MAX_PAGES_PER_PASS);
 
       for (const pass of tab.passes) {
-        await crawlPass(pass, pagesForTab);
+        await crawlPass(tab.key, pass, pagesPerPass);
         await sleep(DELAY_MS);
       }
     }
