@@ -41,6 +41,7 @@ const SUBTAB_ALIASES = {
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
+
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -56,6 +57,28 @@ const SUBTAB_ALIASES = {
   dresses_skirts: "dresses_skirts",
   shoes: "shoes",
 };
+
+const TERM_ALIASES = {
+  tee: ["t-shirt", "t shirt", "tshirt"],
+  tshirt: ["t-shirt", "t shirt", "tee"],
+  tshirts: ["t-shirts", "t shirts", "tees"],
+  sneaker: ["trainer"],
+  sneakers: ["trainers"],
+  heel: ["stiletto", "pump"],
+  heels: ["stilettos", "pumps"],
+  loafer: ["oxford"],
+  loafers: ["oxfords"],
+  jacket: ["coat"],
+  coats: ["jackets"],
+  skirt: ["skirts"],
+  skirts: ["skirt"],
+  short: ["shorts"],
+  shorts: ["short"],
+};
+
+function uniq(arr) {
+  return [...new Set(arr)];
+}
 
 function normalizeTabKey(raw) {
   const cleaned = String(raw || "all")
@@ -73,6 +96,115 @@ function buildCreatorAvatar(creatorType, creatorId) {
     return `rbxthumb://type=GroupIcon&id=${creatorId}&w=150&h=150`;
   }
   return `rbxthumb://type=AvatarHeadShot&id=${creatorId}&w=150&h=150`;
+}
+
+function normalizeQuery(qRaw) {
+  return String(qRaw || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function expandWordForms(word) {
+  const w = String(word || "").toLowerCase().trim();
+  if (!w) return [];
+
+  const out = new Set([w]);
+
+  if (w.includes("-")) out.add(w.replace(/-/g, " "));
+  if (w.includes(" ")) out.add(w.replace(/\s+/g, "-"));
+
+  if (w.endsWith("ies") && w.length > 3) out.add(`${w.slice(0, -3)}y`);
+  if (w.endsWith("y") && w.length > 2) out.add(`${w.slice(0, -1)}ies`);
+
+  if (w.endsWith("es") && w.length > 3) out.add(w.slice(0, -2));
+  if (w.endsWith("s") && w.length > 2) out.add(w.slice(0, -1));
+  if (!w.endsWith("s")) out.add(`${w}s`);
+
+  return [...out];
+}
+
+function buildSearchTerms(qRaw) {
+  const normalized = normalizeQuery(qRaw);
+  if (!normalized) {
+    return {
+      normalized: "",
+      phraseLike: null,
+      qNumeric: null,
+      tokenLikes: null,
+      coreTokens: [],
+      expandedTokens: [],
+    };
+  }
+
+  const baseTokens = normalized.split(" ").filter(Boolean);
+  const expanded = new Set();
+
+  for (const base of baseTokens) {
+    for (const form of expandWordForms(base)) expanded.add(form);
+
+    const aliasList = TERM_ALIASES[base] || [];
+    for (const alias of aliasList) {
+      for (const form of expandWordForms(alias)) expanded.add(form);
+    }
+  }
+
+  // phrase variants for hyphen/space
+  expanded.add(normalized.replace(/\s+/g, "-"));
+  expanded.add(normalized.replace(/-/g, " "));
+
+  const expandedTokens = uniq([...expanded].filter((t) => t.length > 1));
+  const tokenLikes = expandedTokens.length > 0 ? expandedTokens.map((t) => `%${t}%`) : null;
+  const qNumeric = /^\d+$/.test(String(qRaw || "").trim()) ? Number(String(qRaw).trim()) : null;
+
+  return {
+    normalized,
+    phraseLike: `%${normalized}%`,
+    qNumeric,
+    tokenLikes,
+    coreTokens: baseTokens,
+    expandedTokens,
+  };
+}
+
+function termMatch(text, token) {
+  return String(text || "").toLowerCase().includes(String(token || "").toLowerCase());
+}
+
+function hasAnyForm(text, baseToken) {
+  const forms = expandWordForms(baseToken);
+  return forms.some((f) => termMatch(text, f));
+}
+
+function computeRank(item, terms) {
+  if (!terms || !terms.normalized) return 0;
+
+  const name = String(item.name || "").toLowerCase();
+  const creator = String(item.creator_name || "").toLowerCase();
+  let score = 0;
+
+  // Tier 1: exact phrase
+  if (name.includes(terms.normalized)) score += 120;
+
+  // Tier 2: all core tokens present (in any order, with singular/plural handling)
+  if (terms.coreTokens.length > 0) {
+    const allPresent = terms.coreTokens.every((t) => hasAnyForm(name, t));
+    if (allPresent) score += 70;
+  }
+
+  // Tier 3: partial token overlap
+  let hits = 0;
+  for (const tok of terms.expandedTokens) {
+    if (name.includes(tok)) hits += 1;
+  }
+  score += Math.min(hits, 8) * 12;
+
+  // creator + numeric boosts
+  if (creator && creator.includes(terms.normalized)) score += 25;
+  if (terms.qNumeric !== null && Number(item.asset_id) === terms.qNumeric) score += 200;
+
+  return score;
 }
 
 function mapItemRow(r) {
@@ -101,6 +233,7 @@ function mapItemRow(r) {
     is_bundle_parent: false,
     role: r.role || null,
     updated_at: r.updated_at || null,
+    _sort_bucket: Number(r.sort_bucket || 0),
   };
 }
 
@@ -130,7 +263,15 @@ function mapBundleRow(r) {
     is_bundle_parent: true,
     role: null,
     updated_at: r.updated_at || null,
+    _sort_bucket: Number(r.sort_bucket || 1),
   };
+}
+
+function sanitizeItem(item) {
+  const clone = { ...item };
+  delete clone._sort_bucket;
+  delete clone._rank;
+  return clone;
 }
 
 function getSubtabSpec(subtab) {
@@ -293,28 +434,33 @@ app.get("/catalog/search", async (req, reply) => {
 
     const category = String(req.query.category || "clothing").toLowerCase();
     const subtab = normalizeTabKey(req.query.subtab || "all");
-
-    const qRaw = String(req.query.q || "").trim();
-    const q = qRaw.toLowerCase();
-    const qLike = q.length > 0 ? `%${q}%` : null;
-    const qNumeric = /^\d+$/.test(qRaw) ? Number(qRaw) : null;
-
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v28:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const terms = buildSearchTerms(req.query.q || "");
+    const hasQuery = terms.normalized.length > 0;
+
+    const cacheKey = `search:v29:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
     }
 
     const spec = getSubtabSpec(subtab);
-    let rows = [];
+
+    // For query mode, fetch wider then rank client-side.
+    const widenedLimit = hasQuery
+      ? Math.min(700, Math.max(limit * 10, offset + limit + 120))
+      : limit;
+    const widenedOffset = hasQuery ? 0 : offset;
+
+    let items = [];
 
     if (spec.mode === "shoes_bundle_parents") {
       const sql = `
         SELECT
           b.*,
+          1 AS sort_bucket,
           CASE
             WHEN lower(coalesce(b.creator_type, '')) = 'group' AND b.creator_id IS NOT NULL
               THEN 'rbxthumb://type=GroupIcon&id=' || b.creator_id::text || '&w=150&h=150'
@@ -338,6 +484,8 @@ app.get("/catalog/search", async (req, reply) => {
             OR lower(coalesce(b.name,'')) LIKE $2
             OR lower(coalesce(b.creator_name,'')) LIKE $2
             OR ($3::bigint IS NOT NULL AND b.bundle_id = $3)
+            OR ($4::text[] IS NOT NULL AND lower(coalesce(b.name,'')) LIKE ANY($4::text[]))
+            OR ($4::text[] IS NOT NULL AND lower(coalesce(b.creator_name,'')) LIKE ANY($4::text[]))
             OR EXISTS (
               SELECT 1
               FROM public.bundle_asset_links l
@@ -347,14 +495,23 @@ app.get("/catalog/search", async (req, reply) => {
                   lower(coalesce(i.name,'')) LIKE $2
                   OR lower(coalesce(i.creator_name,'')) LIKE $2
                   OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+                  OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+                  OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
                 )
             )
           )
         ORDER BY b.updated_at DESC, b.bundle_id DESC
-        LIMIT $4 OFFSET $5;
+        LIMIT $5 OFFSET $6;
       `;
-      const result = await pool.query(sql, [category, qLike, qNumeric, limit, offset]);
-      rows = result.rows.map(mapBundleRow);
+      const { rows } = await pool.query(sql, [
+        category,
+        terms.phraseLike,
+        terms.qNumeric,
+        terms.tokenLikes,
+        widenedLimit,
+        widenedOffset,
+      ]);
+      items = rows.map(mapBundleRow);
     } else if (spec.mode === "all_strict") {
       const sql = `
         WITH item_rows AS (
@@ -380,8 +537,8 @@ app.get("/catalog/search", async (req, reply) => {
             'asset'::text AS detail_kind,
             NULL::text AS role,
             CASE
-              WHEN i.asset_type_id = ANY($6::int[]) THEN 0
-              WHEN i.asset_type_id = ANY($7::int[]) THEN 2
+              WHEN i.asset_type_id = ANY($7::int[]) THEN 0
+              WHEN i.asset_type_id = ANY($8::int[]) THEN 2
               ELSE 3
             END AS sort_bucket,
             CASE
@@ -394,14 +551,16 @@ app.get("/catalog/search", async (req, reply) => {
           FROM public.catalog_items i
           WHERE lower(coalesce(i.category, '')) = $1
             AND (
-              i.asset_type_id = ANY($6::int[])
-              OR i.asset_type_id = ANY($7::int[])
+              i.asset_type_id = ANY($7::int[])
+              OR i.asset_type_id = ANY($8::int[])
             )
             AND (
               $2::text IS NULL
               OR lower(coalesce(i.name,'')) LIKE $2
               OR lower(coalesce(i.creator_name,'')) LIKE $2
               OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+              OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+              OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
             )
         ),
         bundle_rows AS (
@@ -450,6 +609,8 @@ app.get("/catalog/search", async (req, reply) => {
               OR lower(coalesce(b.name,'')) LIKE $2
               OR lower(coalesce(b.creator_name,'')) LIKE $2
               OR ($3::bigint IS NOT NULL AND b.bundle_id = $3)
+              OR ($4::text[] IS NOT NULL AND lower(coalesce(b.name,'')) LIKE ANY($4::text[]))
+              OR ($4::text[] IS NOT NULL AND lower(coalesce(b.creator_name,'')) LIKE ANY($4::text[]))
               OR EXISTS (
                 SELECT 1
                 FROM public.bundle_asset_links l
@@ -459,6 +620,8 @@ app.get("/catalog/search", async (req, reply) => {
                     lower(coalesce(i.name,'')) LIKE $2
                     OR lower(coalesce(i.creator_name,'')) LIKE $2
                     OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+                    OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+                    OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
                   )
               )
             )
@@ -469,22 +632,21 @@ app.get("/catalog/search", async (req, reply) => {
           SELECT * FROM bundle_rows
         ) u
         ORDER BY u.sort_bucket ASC, u.updated_at DESC, u.asset_id DESC
-        LIMIT $4 OFFSET $5;
+        LIMIT $5 OFFSET $6;
       `;
-
-      const result = await pool.query(sql, [
+      const { rows } = await pool.query(sql, [
         category,
-        qLike,
-        qNumeric,
-        limit,
-        offset,
+        terms.phraseLike,
+        terms.qNumeric,
+        terms.tokenLikes,
+        widenedLimit,
+        widenedOffset,
         NON_SHOE_LAYERED_TYPES,
         CLASSIC_CLOTHING_TYPES,
       ]);
-
-      rows = result.rows.map((r) => (r.is_bundle_parent ? mapBundleRow(r) : mapItemRow(r)));
+      items = rows.map((r) => (r.is_bundle_parent ? mapBundleRow(r) : mapItemRow(r)));
     } else {
-      const params = [category, qLike, qNumeric];
+      const params = [category, terms.phraseLike, terms.qNumeric, terms.tokenLikes];
       let where = `
         WHERE lower(coalesce(i.category, '')) = $1
           AND (
@@ -492,6 +654,8 @@ app.get("/catalog/search", async (req, reply) => {
             OR lower(coalesce(i.name,'')) LIKE $2
             OR lower(coalesce(i.creator_name,'')) LIKE $2
             OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
+            OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
+            OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
           )
       `;
       let orderSql = "i.updated_at DESC, i.asset_id DESC";
@@ -503,7 +667,7 @@ app.get("/catalog/search", async (req, reply) => {
         params.push(spec.layeredTypes);
         const layeredIdx = params.length;
 
-        if (spec.fallbackClassicTypes && spec.fallbackClassicTypes.length > 0) {
+        if (spec.fallbackClassicTypes.length > 0) {
           params.push(spec.fallbackClassicTypes);
           const fallbackIdx = params.length;
           params.push(spec.fallbackTitleRegex);
@@ -529,7 +693,7 @@ app.get("/catalog/search", async (req, reply) => {
         `;
       }
 
-      params.push(limit, offset);
+      params.push(widenedLimit, widenedOffset);
       const sql = `
         SELECT
           i.*,
@@ -539,20 +703,41 @@ app.get("/catalog/search", async (req, reply) => {
             WHEN i.creator_id IS NOT NULL
               THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
             ELSE '${PLACEHOLDER}'
-          END AS creator_avatar_url
+          END AS creator_avatar_url,
+          0 AS sort_bucket
         FROM public.catalog_items i
         ${where}
         ORDER BY ${orderSql}
         LIMIT $${params.length - 1}
         OFFSET $${params.length};
       `;
-      const result = await pool.query(sql, params);
-      rows = result.rows.map(mapItemRow);
+      const { rows } = await pool.query(sql, params);
+      items = rows.map(mapItemRow);
     }
 
+    // Additive ranking tiers only when query exists.
+    if (hasQuery) {
+      for (const it of items) {
+        it._rank = computeRank(it, terms);
+      }
+      items.sort((a, b) => {
+        if ((b._rank || 0) !== (a._rank || 0)) return (b._rank || 0) - (a._rank || 0);
+        if ((a._sort_bucket || 0) !== (b._sort_bucket || 0)) return (a._sort_bucket || 0) - (b._sort_bucket || 0);
+
+        const aTime = new Date(a.updated_at || 0).getTime();
+        const bTime = new Date(b.updated_at || 0).getTime();
+        if (bTime !== aTime) return bTime - aTime;
+
+        return Number(b.asset_id || 0) - Number(a.asset_id || 0);
+      });
+    }
+
+    const paged = items.slice(offset, offset + limit).map(sanitizeItem);
+    const nextOffset = items.length > offset + limit ? offset + limit : null;
+
     const response = {
-      items: rows,
-      nextOffset: rows.length === limit ? offset + limit : null,
+      items: paged,
+      nextOffset,
       subtabKey: subtab,
     };
 
@@ -630,10 +815,10 @@ app.get("/catalog/item/:id", async (req, reply) => {
         [id]
       );
 
-      const bundle_items = childRes.rows.map((r) => mapItemRow(r));
+      const bundle_items = childRes.rows.map((r) => sanitizeItem(mapItemRow(r)));
 
       return {
-        item: parent,
+        item: sanitizeItem(parent),
         bundle_items,
         detail_mode: "bundle_parent",
         can_wear: true,
@@ -707,7 +892,7 @@ app.get("/catalog/item/:id", async (req, reply) => {
       item.subcategory = "shoes";
 
       return {
-        item,
+        item: sanitizeItem(item),
         bundle_items: [],
         detail_mode: "bundle_child",
         can_wear: true,
@@ -717,7 +902,7 @@ app.get("/catalog/item/:id", async (req, reply) => {
     }
 
     return {
-      item,
+      item: sanitizeItem(item),
       bundle_items: [],
       detail_mode: "regular",
       can_wear: true,
