@@ -41,6 +41,7 @@ const SUBTAB_ALIASES = {
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
+
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -256,6 +257,11 @@ async function ensureSchema() {
     );
   `);
 
+  -- compatibility for older existing tables
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
+  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'bundle';`);
+
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
@@ -294,7 +300,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v26:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v27:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -475,7 +481,6 @@ app.get("/catalog/search", async (req, reply) => {
 
       rows = result.rows.map((r) => (r.is_bundle_parent ? mapBundleRow(r) : mapItemRow(r)));
     } else {
-      // classic/layered subtabs from catalog_items
       const params = [category, qLike, qNumeric];
       let where = `
         WHERE lower(coalesce(i.category, '')) = $1
@@ -686,7 +691,6 @@ app.get("/catalog/item/:id", async (req, reply) => {
     if (linkRes.rowCount > 0) {
       const link = linkRes.rows[0];
 
-      // child creator avatar fallback from parent shop/group when child has no creator data/avatar
       if (!item.creator_id && link.parent_creator_id) {
         item.creator_id = Number(link.parent_creator_id);
         item.creator_type = link.parent_creator_type;
