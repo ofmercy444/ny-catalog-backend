@@ -13,31 +13,73 @@ const CATEGORY = 3;
 const PAGE_LIMIT = 30;
 const MAX_PAGES_PER_PASS = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 3);
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 2200);
+const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 120);
 const INCLUDE_NOT_FOR_SALE =
   String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
+const CLASSIC_TSHIRT_TYPE = 2;
+const CLASSIC_SHIRT_TYPE = 11;
+const CLASSIC_PANTS_TYPE = 12;
+
+// Canonical Roblox layered clothing type ids
+const LAYERED_TYPE_TO_SUBTAB = {
+  64: "t_shirts",
+  65: "shirts",
+  66: "pants",
+  67: "jackets",
+  68: "sweaters",
+  69: "shorts",
+  70: "shoes", // left shoe
+  71: "shoes", // right shoe
+  72: "dresses_skirts",
+};
+
+const LAYERED_TABS = new Set([
+  "shirts",
+  "jackets",
+  "sweaters",
+  "t_shirts",
+  "pants",
+  "shorts",
+  "dresses_skirts",
+  "shoes",
+]);
+
+const CLASSIC_TABS = new Set([
+  "classic_shirts",
+  "classic_pants",
+  "classic_t_shirts",
+]);
+
 const CRAWL_PLAN = [
-  { key: "all", passes: [{ keyword: "", intent: "all" }] },
+  { key: "all", passes: [{ keyword: "" }] },
 
-  { key: "classic_shirts", passes: [{ keyword: "classic shirt template", intent: "classic" }] },
-  { key: "classic_pants", passes: [{ keyword: "classic pants template", intent: "classic" }] },
-  { key: "classic_t_shirts", passes: [{ keyword: "classic t shirt", intent: "classic" }] },
+  { key: "classic_shirts", passes: [{ keyword: "classic shirt template" }] },
+  { key: "classic_pants", passes: [{ keyword: "classic pants template" }] },
+  { key: "classic_t_shirts", passes: [{ keyword: "classic t shirt" }] },
 
-  { key: "shirts", passes: [{ keyword: "layered shirt", intent: "layered" }, { keyword: "shirt", intent: "fallback" }] },
-  { key: "jackets", passes: [{ keyword: "layered jacket", intent: "layered" }, { keyword: "jacket", intent: "fallback" }] },
-  { key: "sweaters", passes: [{ keyword: "layered sweater", intent: "layered" }, { keyword: "sweater", intent: "fallback" }] },
-  { key: "t_shirts", passes: [{ keyword: "layered t shirt", intent: "layered" }, { keyword: "t shirt", intent: "fallback" }] },
-  { key: "pants", passes: [{ keyword: "layered pants", intent: "layered" }, { keyword: "pants", intent: "fallback" }] },
-  { key: "shorts", passes: [{ keyword: "layered shorts", intent: "layered" }, { keyword: "shorts", intent: "fallback" }] },
-  { key: "dresses_skirts", passes: [{ keyword: "layered dress skirt", intent: "layered" }, { keyword: "dress skirt", intent: "fallback" }] },
-  { key: "shoes", passes: [{ keyword: "layered shoes", intent: "layered" }, { keyword: "shoes", intent: "fallback" }] },
+  { key: "shirts", passes: [{ keyword: "layered shirt" }, { keyword: "shirt" }] },
+  { key: "jackets", passes: [{ keyword: "layered jacket" }, { keyword: "jacket" }] },
+  { key: "sweaters", passes: [{ keyword: "layered sweater" }, { keyword: "sweater" }] },
+  { key: "t_shirts", passes: [{ keyword: "layered t shirt" }, { keyword: "t shirt" }] },
+  { key: "pants", passes: [{ keyword: "layered pants" }, { keyword: "pants" }] },
+  { key: "shorts", passes: [{ keyword: "layered shorts" }, { keyword: "shorts" }] },
+  { key: "dresses_skirts", passes: [{ keyword: "layered dress skirt" }, { keyword: "dress skirt" }] },
+  { key: "shoes", passes: [{ keyword: "layered shoes" }, { keyword: "shoes" }] },
 ];
 
-const CLASSIC_NAME_RE =
-  /(classic shirt|classic pants|classic t-shirt|classic t shirt|template|2d)/i;
+const FALLBACK_TEXT_MATCH = {
+  shirts: /\b(shirt|top|tee|t-shirt|t shirt)\b/i,
+  jackets: /\b(jacket|coat|hoodie|zip(?:-|\s)?up)\b/i,
+  sweaters: /\b(sweater|cardigan|knit)\b/i,
+  t_shirts: /\b(t-shirt|t shirt|tee)\b/i,
+  pants: /\b(pants|jeans|trousers|sweatpants|cargo)\b/i,
+  shorts: /\bshorts?\b/i,
+  dresses_skirts: /\b(dress|skirt|gown)\b/i,
+  shoes: /\b(shoe|shoes|sneaker|sneakers|boot|boots|heel|heels)\b/i,
+};
 
-const LAYERED_NAME_TYPE_RE =
-  /(layered|shirt accessory|pants accessory|jacket accessory|sweater accessory|shorts accessory|dress skirt accessory|shoe accessory|left shoe|right shoe|3d|mesh)/i;
+const memoryAssetTypeCache = new Map();
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,6 +91,7 @@ function buildUrl({ keyword, cursor }) {
   url.searchParams.set("Limit", String(PAGE_LIMIT));
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
+
   if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
   if (cursor) url.searchParams.set("Cursor", cursor);
   return url.toString();
@@ -71,7 +114,7 @@ async function fetchJsonWithRetry(url, tries = 5) {
     const text = await res.text().catch(() => "");
     if (res.status === 429) {
       const backoff = 1200 * attempt;
-      console.log(`[429] rate limited, retrying in ${backoff}ms`);
+      console.log(`[429] ${url} retry in ${backoff}ms`);
       await sleep(backoff);
       continue;
     }
@@ -80,6 +123,42 @@ async function fetchJsonWithRetry(url, tries = 5) {
   }
 
   throw new Error(`HTTP 429 persisted after retries: ${url}`);
+}
+
+async function fetchAssetMetaWithRetry(assetId, tries = 4) {
+  const url = `https://economy.roblox.com/v2/assets/${assetId}/details`;
+  let attempt = 0;
+
+  while (attempt < tries) {
+    attempt += 1;
+
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "ny-catalog-backend/1.0",
+        Accept: "application/json",
+      },
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      return {
+        asset_type_id: Number(json.AssetTypeId ?? json.assetTypeId ?? null) || null,
+        asset_type_name: String(
+          json.AssetType ?? json.assetType ?? json.AssetTypeName ?? json.assetTypeName ?? ""
+        ),
+      };
+    }
+
+    if (res.status === 429) {
+      const backoff = 900 * attempt;
+      await sleep(backoff);
+      continue;
+    }
+
+    return { asset_type_id: null, asset_type_name: "" };
+  }
+
+  return { asset_type_id: null, asset_type_name: "" };
 }
 
 async function ensureSchema() {
@@ -98,6 +177,8 @@ async function ensureSchema() {
       is_limited BOOLEAN DEFAULT FALSE,
       is_limited_unique BOOLEAN DEFAULT FALSE,
       price_robux INTEGER,
+      asset_type_id INTEGER,
+      asset_type_name TEXT,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
@@ -112,8 +193,12 @@ async function ensureSchema() {
     );
   `);
 
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_id INTEGER;`);
+  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_name TEXT;`);
+
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_subtabs_key ON public.catalog_item_subtabs(subtab_key);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_subtabs_layered ON public.catalog_item_subtabs(subtab_key, is_layered);`);
 }
@@ -144,21 +229,113 @@ function normalizeItem(raw) {
     category: "clothing",
     thumbnail_url: raw.thumbnailUrl || "",
     is_offsale:
-      raw.itemRestrictions?.includes?.("Offsale") || raw.isOffsale === true || false,
+      raw.itemRestrictions?.includes?.("Offsale") ||
+      raw.isOffsale === true ||
+      false,
     is_limited:
-      raw.itemRestrictions?.includes?.("Limited") || raw.isLimited === true || false,
+      raw.itemRestrictions?.includes?.("Limited") ||
+      raw.isLimited === true ||
+      false,
     is_limited_unique:
-      raw.itemRestrictions?.includes?.("LimitedUnique") || raw.isLimitedUnique === true || false,
+      raw.itemRestrictions?.includes?.("LimitedUnique") ||
+      raw.isLimitedUnique === true ||
+      false,
     price_robux: Number.isFinite(raw.price) ? raw.price : null,
+    asset_type_id: null,
+    asset_type_name: "",
   };
 }
 
-function computeLayeredFlag(item) {
-  // IMPORTANT: use name + item_type only (description is noisy/spammy)
-  const nameType = `${item.name || ""} ${item.item_type || ""}`.toLowerCase();
+async function getKnownAssetTypes(assetIds) {
+  if (assetIds.length === 0) return new Map();
 
-  if (CLASSIC_NAME_RE.test(nameType)) return false;
-  if (LAYERED_NAME_TYPE_RE.test(nameType)) return true;
+  const result = await pool.query(
+    `
+    SELECT asset_id, asset_type_id, asset_type_name
+    FROM public.catalog_items
+    WHERE asset_id = ANY($1::bigint[])
+    `,
+    [assetIds]
+  );
+
+  const map = new Map();
+  for (const row of result.rows) {
+    const key = String(row.asset_id);
+    map.set(key, {
+      asset_type_id: row.asset_type_id == null ? null : Number(row.asset_type_id),
+      asset_type_name: row.asset_type_name || "",
+    });
+  }
+
+  return map;
+}
+
+async function enrichAssetTypes(items) {
+  const ids = items.map((i) => i.asset_id).filter((id) => Number.isFinite(id));
+  const knownMap = await getKnownAssetTypes(ids);
+
+  for (const item of items) {
+    const key = String(item.asset_id);
+    if (!item.asset_id) continue;
+
+    if (memoryAssetTypeCache.has(key)) {
+      const meta = memoryAssetTypeCache.get(key);
+      item.asset_type_id = meta.asset_type_id;
+      item.asset_type_name = meta.asset_type_name;
+      continue;
+    }
+
+    const known = knownMap.get(key);
+    if (known && known.asset_type_id != null) {
+      memoryAssetTypeCache.set(key, known);
+      item.asset_type_id = known.asset_type_id;
+      item.asset_type_name = known.asset_type_name;
+      continue;
+    }
+
+    const fetched = await fetchAssetMetaWithRetry(item.asset_id);
+    memoryAssetTypeCache.set(key, fetched);
+    item.asset_type_id = fetched.asset_type_id;
+    item.asset_type_name = fetched.asset_type_name;
+
+    await sleep(ASSET_META_DELAY_MS);
+  }
+}
+
+function isClassicType(typeId) {
+  return typeId === CLASSIC_TSHIRT_TYPE || typeId === CLASSIC_SHIRT_TYPE || typeId === CLASSIC_PANTS_TYPE;
+}
+
+function layeredSubtabForType(typeId) {
+  return LAYERED_TYPE_TO_SUBTAB[typeId] || null;
+}
+
+function shouldMapToSubtab(subtabKey, item) {
+  const typeId = item.asset_type_id;
+  const canonicalLayeredSubtab = layeredSubtabForType(typeId);
+  const text = `${item.name || ""} ${item.description || ""}`;
+
+  if (subtabKey === "all") return true;
+
+  if (CLASSIC_TABS.has(subtabKey)) {
+    if (subtabKey === "classic_shirts") return typeId === CLASSIC_SHIRT_TYPE;
+    if (subtabKey === "classic_pants") return typeId === CLASSIC_PANTS_TYPE;
+    if (subtabKey === "classic_t_shirts") return typeId === CLASSIC_TSHIRT_TYPE;
+    return false;
+  }
+
+  if (LAYERED_TABS.has(subtabKey)) {
+    if (canonicalLayeredSubtab) return canonicalLayeredSubtab === subtabKey;
+
+    // Non-layered fallback items can still appear after layered
+    if (isClassicType(typeId)) {
+      const re = FALLBACK_TEXT_MATCH[subtabKey];
+      return re ? re.test(text) : false;
+    }
+
+    return false;
+  }
+
   return false;
 }
 
@@ -167,9 +344,12 @@ async function upsertItem(item) {
     `
     INSERT INTO public.catalog_items (
       asset_id, name, description, creator_name, creator_id, creator_type,
-      item_type, category, thumbnail_url, is_offsale, is_limited, is_limited_unique, price_robux, updated_at
+      item_type, category, thumbnail_url, is_offsale, is_limited, is_limited_unique, price_robux,
+      asset_type_id, asset_type_name, updated_at
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
+    VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW()
+    )
     ON CONFLICT (asset_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
@@ -183,6 +363,8 @@ async function upsertItem(item) {
       is_limited = EXCLUDED.is_limited,
       is_limited_unique = EXCLUDED.is_limited_unique,
       price_robux = EXCLUDED.price_robux,
+      asset_type_id = COALESCE(EXCLUDED.asset_type_id, public.catalog_items.asset_type_id),
+      asset_type_name = COALESCE(NULLIF(EXCLUDED.asset_type_name, ''), public.catalog_items.asset_type_name),
       updated_at = NOW()
     `,
     [
@@ -199,6 +381,8 @@ async function upsertItem(item) {
       item.is_limited,
       item.is_limited_unique,
       item.price_robux,
+      item.asset_type_id,
+      item.asset_type_name,
     ]
   );
 }
@@ -209,14 +393,14 @@ async function upsertSubtabMapping(assetId, subtabKey, isLayered) {
     INSERT INTO public.catalog_item_subtabs (asset_id, subtab_key, is_layered, updated_at)
     VALUES ($1, $2, $3, NOW())
     ON CONFLICT (asset_id, subtab_key) DO UPDATE SET
-      is_layered = public.catalog_item_subtabs.is_layered OR EXCLUDED.is_layered,
+      is_layered = EXCLUDED.is_layered,
       updated_at = NOW()
     `,
     [assetId, subtabKey, !!isLayered]
   );
 }
 
-async function rebuildSubtab(subtabKey) {
+async function rebuildSubtabMappings(subtabKey) {
   await pool.query(`DELETE FROM public.catalog_item_subtabs WHERE subtab_key = $1`, [subtabKey]);
 }
 
@@ -224,34 +408,39 @@ async function crawlPass(subtabKey, passConfig) {
   let cursor = null;
   let pages = 0;
   let upserts = 0;
+  let mapped = 0;
   let layeredMapped = 0;
 
   while (pages < MAX_PAGES_PER_PASS) {
     const url = buildUrl({ keyword: passConfig.keyword, cursor });
     const json = await fetchJsonWithRetry(url);
     const rows = Array.isArray(json.data) ? json.data : [];
+    const items = rows.map(normalizeItem).filter((i) => Number.isFinite(i.asset_id));
 
-    for (const raw of rows) {
-      const item = normalizeItem(raw);
-      if (!Number.isFinite(item.asset_id)) continue;
+    await enrichAssetTypes(items);
 
+    for (const item of items) {
       await upsertItem(item);
-
-      const layered = computeLayeredFlag(item);
-      if (layered) layeredMapped += 1;
-
-      await upsertSubtabMapping(item.asset_id, subtabKey, layered);
       upserts += 1;
+
+      if (!shouldMapToSubtab(subtabKey, item)) continue;
+
+      const isLayered = layeredSubtabForType(item.asset_type_id) !== null;
+      if (isLayered) layeredMapped += 1;
+
+      await upsertSubtabMapping(item.asset_id, subtabKey, isLayered);
+      mapped += 1;
     }
 
     pages += 1;
     cursor = json.nextPageCursor || null;
     if (!cursor) break;
+
     await sleep(DELAY_MS);
   }
 
   console.log(
-    `[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | pages=${pages}, upserts=${upserts}, layeredMapped=${layeredMapped}`
+    `[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | pages=${pages}, upserts=${upserts}, mapped=${mapped}, layeredMapped=${layeredMapped}`
   );
 }
 
@@ -263,7 +452,8 @@ async function main() {
     await ensureSchema();
 
     for (const tab of CRAWL_PLAN) {
-      await rebuildSubtab(tab.key);
+      await rebuildSubtabMappings(tab.key);
+
       for (const pass of tab.passes) {
         await crawlPass(tab.key, pass);
         await sleep(DELAY_MS);
