@@ -9,15 +9,13 @@ const pool = new Pool({
       : { rejectUnauthorized: false },
 });
 
-const CATEGORY = 3; // Roblox catalog category for clothing/accessory marketplace search
+const CATEGORY = 3;
 const PAGE_LIMIT = 30;
 const MAX_PAGES_PER_PASS = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 3);
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 2200);
 const INCLUDE_NOT_FOR_SALE =
   String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-// Structured crawl plan: for layered-priority tabs we crawl layered query first,
-// then a classic/fallback query so layered appears first in sorted results.
 const CRAWL_PLAN = [
   { key: "all", passes: [{ keyword: "", isLayered: true }] },
 
@@ -70,19 +68,13 @@ function buildUrl({ keyword, cursor }) {
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
 
-  if (keyword && keyword.trim()) {
-    url.searchParams.set("Keyword", keyword.trim());
-  }
-  if (cursor) {
-    url.searchParams.set("Cursor", cursor);
-  }
-
+  if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
+  if (cursor) url.searchParams.set("Cursor", cursor);
   return url.toString();
 }
 
 async function fetchJsonWithRetry(url, tries = 5) {
   let attempt = 0;
-
   while (attempt < tries) {
     attempt += 1;
 
@@ -93,11 +85,9 @@ async function fetchJsonWithRetry(url, tries = 5) {
       },
     });
 
-    if (res.ok) {
-      return res.json();
-    }
+    if (res.ok) return res.json();
 
-    const bodyText = await res.text().catch(() => "");
+    const text = await res.text().catch(() => "");
     if (res.status === 429) {
       const backoff = 1200 * attempt;
       console.log(`[429] rate limited, retrying in ${backoff}ms`);
@@ -105,10 +95,10 @@ async function fetchJsonWithRetry(url, tries = 5) {
       continue;
     }
 
-    throw new Error(`HTTP ${res.status} on ${url}\n${bodyText}`);
+    throw new Error(`HTTP ${res.status} ${url}\n${text}`);
   }
 
-  throw new Error(`HTTP 429 persisted after retries for ${url}`);
+  throw new Error(`HTTP 429 persisted after retries: ${url}`);
 }
 
 async function ensureSchema() {
@@ -149,8 +139,6 @@ async function ensureSchema() {
 
 function normalizeItem(raw) {
   const creator = raw.creator || {};
-
-  // creator id can appear in multiple forms depending on payload shape
   const creatorIdRaw =
     creator.id ??
     creator.creatorTargetId ??
@@ -163,7 +151,6 @@ function normalizeItem(raw) {
     : null;
 
   const assetId = Number(raw.id);
-  const thumbnail = raw.thumbnailUrl || "";
 
   return {
     asset_id: Number.isFinite(assetId) ? assetId : null,
@@ -174,7 +161,7 @@ function normalizeItem(raw) {
     creator_type: creator.type || raw.creatorType || "",
     item_type: raw.itemType || raw.assetType || raw.assetTypeName || "",
     category: "clothing",
-    thumbnail_url: thumbnail,
+    thumbnail_url: raw.thumbnailUrl || "",
     is_offsale:
       raw.itemRestrictions?.includes?.("Offsale") ||
       raw.isOffsale === true ||
@@ -240,7 +227,8 @@ async function upsertSubtabMapping(assetId, subtabKey, isLayered) {
     INSERT INTO public.catalog_item_subtabs (asset_id, subtab_key, is_layered, updated_at)
     VALUES ($1, $2, $3, NOW())
     ON CONFLICT (asset_id, subtab_key) DO UPDATE SET
-      is_layered = EXCLUDED.is_layered,
+      -- Keep TRUE forever if any pass found layered for this (asset, subtab)
+      is_layered = public.catalog_item_subtabs.is_layered OR EXCLUDED.is_layered,
       updated_at = NOW()
     `,
     [assetId, subtabKey, !!isLayered]
@@ -255,8 +243,8 @@ async function crawlPass(subtabKey, passConfig) {
   while (pages < MAX_PAGES_PER_PASS) {
     const url = buildUrl({ keyword: passConfig.keyword, cursor });
     const json = await fetchJsonWithRetry(url);
-
     const rows = Array.isArray(json.data) ? json.data : [];
+
     for (const raw of rows) {
       const item = normalizeItem(raw);
       if (!Number.isFinite(item.asset_id)) continue;
@@ -268,12 +256,14 @@ async function crawlPass(subtabKey, passConfig) {
 
     pages += 1;
     cursor = json.nextPageCursor || null;
-
     if (!cursor) break;
+
     await sleep(DELAY_MS);
   }
 
-  console.log(`[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | layered=${passConfig.isLayered} | pages=${pages}, upserts=${upserts}`);
+  console.log(
+    `[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | layered=${passConfig.isLayered} | pages=${pages}, upserts=${upserts}`
+  );
 }
 
 async function main() {
