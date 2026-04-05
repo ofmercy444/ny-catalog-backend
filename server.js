@@ -23,6 +23,7 @@ const SHOE_LEFT_TYPE = 70;
 const SHOE_RIGHT_TYPE = 71;
 
 const LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 70, 71, 72];
+const NON_SHOE_LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 72];
 const CLASSIC_CLOTHING_TYPES = [CLASSIC_TSHIRT_TYPE, CLASSIC_SHIRT_TYPE, CLASSIC_PANTS_TYPE];
 
 const SUBTAB_ALIASES = {
@@ -129,7 +130,7 @@ function getSubtabSpec(subtab) {
 
   return {
     mode: "all_strict",
-    layeredTypes: LAYERED_TYPES,
+    layeredTypes: NON_SHOE_LAYERED_TYPES,
     classicTypes: CLASSIC_CLOTHING_TYPES,
   };
 }
@@ -196,6 +197,7 @@ async function ensureSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_subcategory ON public.catalog_bundles(subcategory);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_updated ON public.catalog_bundles(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_bundles_name_lower ON public.catalog_bundles((lower(name)));`);
+
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bundle_links_bundle_id ON public.bundle_asset_links(bundle_id);`);
 }
 
@@ -415,7 +417,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v24:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v25:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -423,7 +425,7 @@ app.get("/catalog/search", async (req, reply) => {
 
     const spec = getSubtabSpec(subtab);
 
-    // SHOES: search parent name OR linked child shoe name
+    // SHOES subtab: parent bundles only, searchable by parent OR child shoe names
     if (spec.mode === "shoes_bundle_parents") {
       const params = [category];
       let where = `
@@ -483,9 +485,31 @@ app.get("/catalog/search", async (req, reply) => {
       return response;
     }
 
-    // ALL search: include normal items + shoes bundle parents (searchable)
-    if (spec.mode === "all_strict" && q.length > 0) {
-      const params = [category, `%${q}%`, limit, offset];
+    // ALL subtab: exclude child shoes from item rows, include shoe bundle parents (searchable)
+    if (spec.mode === "all_strict") {
+      const params = [category];
+      let itemNameFilter = "";
+      let bundleNameFilter = "";
+
+      if (q.length > 0) {
+        const qIdx = params.length + 1;
+        params.push(`%${q}%`);
+        itemNameFilter = `AND lower(coalesce(i.name,'')) LIKE $${qIdx}`;
+        bundleNameFilter = `
+          AND (
+            lower(coalesce(b.name,'')) LIKE $${qIdx}
+            OR EXISTS (
+              SELECT 1
+              FROM public.bundle_asset_links l2
+              JOIN public.catalog_items i2 ON i2.asset_id = l2.asset_id
+              WHERE l2.bundle_id = b.bundle_id
+                AND lower(coalesce(i2.name,'')) LIKE $${qIdx}
+            )
+          )
+        `;
+      }
+
+      params.push(limit, offset);
 
       const res = await pool.query(
         `
@@ -512,15 +536,16 @@ app.get("/catalog/search", async (req, reply) => {
             i.is_limited_unique,
             i.price_robux,
             i.updated_at,
+
             CASE
-              WHEN i.asset_type_id = ANY(ARRAY[${LAYERED_TYPES.join(",")}]::int[]) THEN 0
+              WHEN i.asset_type_id = ANY(ARRAY[${NON_SHOE_LAYERED_TYPES.join(",")}]::int[]) THEN 0
               ELSE 2
             END AS rank_group
           FROM public.catalog_items i
           WHERE lower(i.category) = $1
-            AND lower(coalesce(i.name,'')) LIKE $2
+            ${itemNameFilter}
             AND (
-              i.asset_type_id = ANY(ARRAY[${LAYERED_TYPES.join(",")}]::int[])
+              i.asset_type_id = ANY(ARRAY[${NON_SHOE_LAYERED_TYPES.join(",")}]::int[])
               OR i.asset_type_id = ANY(ARRAY[${CLASSIC_CLOTHING_TYPES.join(",")}]::int[])
             )
         ),
@@ -547,6 +572,7 @@ app.get("/catalog/search", async (req, reply) => {
             false AS is_limited_unique,
             NULL::int AS price_robux,
             b.updated_at,
+
             1 AS rank_group
           FROM public.catalog_bundles b
           WHERE lower(b.category) = $1
@@ -559,16 +585,7 @@ app.get("/catalog/search", async (req, reply) => {
               SELECT 1 FROM public.bundle_asset_links l
               WHERE l.bundle_id = b.bundle_id AND l.asset_type_id = ${SHOE_RIGHT_TYPE}
             )
-            AND (
-              lower(coalesce(b.name,'')) LIKE $2
-              OR EXISTS (
-                SELECT 1
-                FROM public.bundle_asset_links l2
-                JOIN public.catalog_items i2 ON i2.asset_id = l2.asset_id
-                WHERE l2.bundle_id = b.bundle_id
-                  AND lower(coalesce(i2.name,'')) LIKE $2
-              )
-            )
+            ${bundleNameFilter}
         )
         SELECT *
         FROM (
@@ -577,8 +594,8 @@ app.get("/catalog/search", async (req, reply) => {
           SELECT * FROM bundle_rows
         ) u
         ORDER BY u.rank_group ASC, u.updated_at DESC, u.entity_id DESC
-        LIMIT $3
-        OFFSET $4
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}
         `,
         params
       );
@@ -628,7 +645,7 @@ app.get("/catalog/search", async (req, reply) => {
       return response;
     }
 
-    // default non-shoes browse
+    // other subtabs
     const params = [category];
     const { where, orderSql } = buildItemWhereAndOrder(spec, q, params);
     params.push(limit, offset);
