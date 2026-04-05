@@ -17,40 +17,6 @@ const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 120)
 const INCLUDE_NOT_FOR_SALE =
   String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-const CLASSIC_TSHIRT_TYPE = 2;
-const CLASSIC_SHIRT_TYPE = 11;
-const CLASSIC_PANTS_TYPE = 12;
-
-// Canonical Roblox layered clothing type ids
-const LAYERED_TYPE_TO_SUBTAB = {
-  64: "t_shirts",
-  65: "shirts",
-  66: "pants",
-  67: "jackets",
-  68: "sweaters",
-  69: "shorts",
-  70: "shoes", // left shoe
-  71: "shoes", // right shoe
-  72: "dresses_skirts",
-};
-
-const LAYERED_TABS = new Set([
-  "shirts",
-  "jackets",
-  "sweaters",
-  "t_shirts",
-  "pants",
-  "shorts",
-  "dresses_skirts",
-  "shoes",
-]);
-
-const CLASSIC_TABS = new Set([
-  "classic_shirts",
-  "classic_pants",
-  "classic_t_shirts",
-]);
-
 const CRAWL_PLAN = [
   { key: "all", passes: [{ keyword: "" }] },
 
@@ -67,17 +33,6 @@ const CRAWL_PLAN = [
   { key: "dresses_skirts", passes: [{ keyword: "layered dress skirt" }, { keyword: "dress skirt" }] },
   { key: "shoes", passes: [{ keyword: "layered shoes" }, { keyword: "shoes" }] },
 ];
-
-const FALLBACK_TEXT_MATCH = {
-  shirts: /\b(shirt|top|tee|t-shirt|t shirt)\b/i,
-  jackets: /\b(jacket|coat|hoodie|zip(?:-|\s)?up)\b/i,
-  sweaters: /\b(sweater|cardigan|knit)\b/i,
-  t_shirts: /\b(t-shirt|t shirt|tee)\b/i,
-  pants: /\b(pants|jeans|trousers|sweatpants|cargo)\b/i,
-  shorts: /\bshorts?\b/i,
-  dresses_skirts: /\b(dress|skirt|gown)\b/i,
-  shoes: /\b(shoe|shoes|sneaker|sneakers|boot|boots|heel|heels)\b/i,
-};
 
 const memoryAssetTypeCache = new Map();
 
@@ -99,6 +54,7 @@ function buildUrl({ keyword, cursor }) {
 
 async function fetchJsonWithRetry(url, tries = 5) {
   let attempt = 0;
+
   while (attempt < tries) {
     attempt += 1;
 
@@ -183,24 +139,12 @@ async function ensureSchema() {
     );
   `);
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.catalog_item_subtabs (
-      asset_id BIGINT NOT NULL REFERENCES public.catalog_items(asset_id) ON DELETE CASCADE,
-      subtab_key TEXT NOT NULL,
-      is_layered BOOLEAN DEFAULT FALSE,
-      updated_at TIMESTAMPTZ DEFAULT NOW(),
-      PRIMARY KEY (asset_id, subtab_key)
-    );
-  `);
-
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_id INTEGER;`);
   await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_name TEXT;`);
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_updated ON public.catalog_items(updated_at DESC);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id ON public.catalog_items(asset_type_id);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_subtabs_key ON public.catalog_item_subtabs(subtab_key);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_subtabs_layered ON public.catalog_item_subtabs(subtab_key, is_layered);`);
 }
 
 function normalizeItem(raw) {
@@ -302,43 +246,6 @@ async function enrichAssetTypes(items) {
   }
 }
 
-function isClassicType(typeId) {
-  return typeId === CLASSIC_TSHIRT_TYPE || typeId === CLASSIC_SHIRT_TYPE || typeId === CLASSIC_PANTS_TYPE;
-}
-
-function layeredSubtabForType(typeId) {
-  return LAYERED_TYPE_TO_SUBTAB[typeId] || null;
-}
-
-function shouldMapToSubtab(subtabKey, item) {
-  const typeId = item.asset_type_id;
-  const canonicalLayeredSubtab = layeredSubtabForType(typeId);
-  const text = `${item.name || ""} ${item.description || ""}`;
-
-  if (subtabKey === "all") return true;
-
-  if (CLASSIC_TABS.has(subtabKey)) {
-    if (subtabKey === "classic_shirts") return typeId === CLASSIC_SHIRT_TYPE;
-    if (subtabKey === "classic_pants") return typeId === CLASSIC_PANTS_TYPE;
-    if (subtabKey === "classic_t_shirts") return typeId === CLASSIC_TSHIRT_TYPE;
-    return false;
-  }
-
-  if (LAYERED_TABS.has(subtabKey)) {
-    if (canonicalLayeredSubtab) return canonicalLayeredSubtab === subtabKey;
-
-    // Non-layered fallback items can still appear after layered
-    if (isClassicType(typeId)) {
-      const re = FALLBACK_TEXT_MATCH[subtabKey];
-      return re ? re.test(text) : false;
-    }
-
-    return false;
-  }
-
-  return false;
-}
-
 async function upsertItem(item) {
   await pool.query(
     `
@@ -387,29 +294,11 @@ async function upsertItem(item) {
   );
 }
 
-async function upsertSubtabMapping(assetId, subtabKey, isLayered) {
-  await pool.query(
-    `
-    INSERT INTO public.catalog_item_subtabs (asset_id, subtab_key, is_layered, updated_at)
-    VALUES ($1, $2, $3, NOW())
-    ON CONFLICT (asset_id, subtab_key) DO UPDATE SET
-      is_layered = EXCLUDED.is_layered,
-      updated_at = NOW()
-    `,
-    [assetId, subtabKey, !!isLayered]
-  );
-}
-
-async function rebuildSubtabMappings(subtabKey) {
-  await pool.query(`DELETE FROM public.catalog_item_subtabs WHERE subtab_key = $1`, [subtabKey]);
-}
-
-async function crawlPass(subtabKey, passConfig) {
+async function crawlPass(passConfig) {
   let cursor = null;
   let pages = 0;
   let upserts = 0;
-  let mapped = 0;
-  let layeredMapped = 0;
+  let enriched = 0;
 
   while (pages < MAX_PAGES_PER_PASS) {
     const url = buildUrl({ keyword: passConfig.keyword, cursor });
@@ -422,14 +311,7 @@ async function crawlPass(subtabKey, passConfig) {
     for (const item of items) {
       await upsertItem(item);
       upserts += 1;
-
-      if (!shouldMapToSubtab(subtabKey, item)) continue;
-
-      const isLayered = layeredSubtabForType(item.asset_type_id) !== null;
-      if (isLayered) layeredMapped += 1;
-
-      await upsertSubtabMapping(item.asset_id, subtabKey, isLayered);
-      mapped += 1;
+      if (item.asset_type_id != null) enriched += 1;
     }
 
     pages += 1;
@@ -440,7 +322,7 @@ async function crawlPass(subtabKey, passConfig) {
   }
 
   console.log(
-    `[crawl] ${subtabKey} | keyword="${passConfig.keyword}" | pages=${pages}, upserts=${upserts}, mapped=${mapped}, layeredMapped=${layeredMapped}`
+    `[crawl-pass] keyword="${passConfig.keyword}" pages=${pages}, upserts=${upserts}, enrichedType=${enriched}`
   );
 }
 
@@ -452,10 +334,8 @@ async function main() {
     await ensureSchema();
 
     for (const tab of CRAWL_PLAN) {
-      await rebuildSubtabMappings(tab.key);
-
       for (const pass of tab.passes) {
-        await crawlPass(tab.key, pass);
+        await crawlPass(pass);
         await sleep(DELAY_MS);
       }
     }
