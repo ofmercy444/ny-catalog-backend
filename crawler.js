@@ -36,6 +36,14 @@ const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_R
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 18);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 6);
+console.log("[startup] crawler config", {
+  CRAWL_PAGE_LIMIT_raw: process.env.CRAWL_PAGE_LIMIT,
+  PAGE_LIMIT_computed: PAGE_LIMIT,
+  CRAWL_PAGES_PER_SUBTAB_raw: process.env.CRAWL_PAGES_PER_SUBTAB,
+  CRAWL_SHOE_BUNDLE_PAGES_raw: process.env.CRAWL_SHOE_BUNDLE_PAGES,
+  CRAWL_DELAY_MS_raw: process.env.CRAWL_DELAY_MS,
+  CRAWL_ASSET_META_DELAY_MS_raw: process.env.CRAWL_ASSET_META_DELAY_MS,
+});
 
 const CLASSIC_TSHIRT_TYPE = 2;
 const CLASSIC_SHIRT_TYPE = 11;
@@ -138,7 +146,6 @@ const ACCESSORY_KEYWORDS = {
   [WAIST_ACCESSORY_TYPE]: ["waist accessory", "belt", "waist chain", "fanny pack", "hip bag", "utility belt", "waist skirt", "katana waist"],
 };
 
-// FIX: this constant must exist because buildPlan references it
 const GLOBAL_STYLE_TERMS = [
   "high fashion",
   "runway inspired",
@@ -278,8 +285,16 @@ function isShoeLikeTitle(name) {
 
 function buildSearchUrl({ category, keyword, cursor, limit }) {
   const url = new URL("https://catalog.roblox.com/v1/search/items/details");
+  const finalLimit = Number(limit || PAGE_LIMIT);
+  console.log("[debug] using search limit", {
+    category,
+    keyword: keyword || "",
+    cursor: cursor || null,
+    requested_limit: limit ?? null,
+    final_limit: finalLimit,
+  });
   url.searchParams.set("Category", String(category));
-  url.searchParams.set("Limit", String(limit || PAGE_LIMIT));
+  url.searchParams.set("Limit", String(finalLimit));
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
   if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
