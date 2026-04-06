@@ -114,8 +114,8 @@ const ASSET_TYPE_NAME_TO_ID = {
 
 const CLOTHING_KEYWORDS = {
   all: ["", "y2k", "coquette", "streetwear", "vintage", "retro", "high fashion", "editorial inspired"],
-  classic_shirts: ["classic shirt", "2d shirt", "template shirt", "retro shirt"],
-  classic_pants: ["classic pants", "2d pants", "template pants", "retro pants"],
+  classic_shirts: ["classic shirt", "2d shirt", "template shirt", "legacy shirt", "retro shirt"],
+  classic_pants: ["classic pants", "2d pants", "template pants", "legacy pants", "retro pants"],
   classic_t_shirts: ["classic t-shirt", "classic tee", "2d t shirt", "graphic classic tee"],
 
   shirts: ["layered shirt", "shirt", "top", "blouse", "crop top", "baby tee", "cami", "tank top"],
@@ -137,6 +137,37 @@ const ACCESSORY_KEYWORDS = {
   [BACK_ACCESSORY_TYPE]: ["back accessory", "backpack", "wings", "cape", "sword back", "quiver", "jetpack", "tail accessory", "guitar back"],
   [WAIST_ACCESSORY_TYPE]: ["waist accessory", "belt", "waist chain", "fanny pack", "hip bag", "utility belt", "waist skirt", "katana waist"],
 };
+
+// FIX: this constant must exist because buildPlan references it
+const GLOBAL_STYLE_TERMS = [
+  "high fashion",
+  "runway inspired",
+  "editorial inspired",
+  "luxury streetwear",
+  "quiet luxury",
+  "loud luxury",
+  "street luxe",
+  "urban chic",
+  "capsule wardrobe",
+  "signature style",
+  "dark coquette",
+  "soft grunge",
+  "kawaii goth",
+  "street goth",
+  "cyber y2k",
+  "futuristic y2k",
+  "avatarcore",
+  "animecore",
+  "scenecore",
+  "vampcore",
+  "celestialcore",
+  "spacecore",
+  "forestcore",
+  "royalcore",
+  "princesscore",
+  "visual kei",
+  "harajuku style",
+];
 
 const SHOE_BUNDLE_KEYWORDS = [
   "shoes",
@@ -727,13 +758,15 @@ async function crawlPass(pass, tabKey, mode) {
         continue;
       }
 
-      const classified = classifyByType(t, mode === "accessory_type_target" ? "accessories" : "clothing", tabKey);
+      const classified = classifyByType(
+        t,
+        mode === "accessory_type_target" ? "accessories" : "clothing",
+        tabKey
+      );
 
       item.category = classified.category;
       item.subcategory = classified.subcategory;
 
-      // strict rule: shoes tab browse stays bundle-only on API side;
-      // crawler still stores 70/71 child assets for linking/details.
       await upsertItem(item);
       upserts += 1;
     }
@@ -746,7 +779,9 @@ async function crawlPass(pass, tabKey, mode) {
     await sleep(DELAY_MS + jitter(700));
   }
 
-  console.log(`[crawl] mode=${mode} tab=${tabKey} kw="${pass.keyword}" cat=${pass.categoryId} pages=${pages} seen=${seen} upserts=${upserts}`);
+  console.log(
+    `[crawl] mode=${mode} tab=${tabKey} kw="${pass.keyword}" cat=${pass.categoryId} pages=${pages} seen=${seen} upserts=${upserts}`
+  );
 }
 
 async function crawlShoeBundles(runSeed) {
@@ -881,7 +916,9 @@ async function crawlShoeBundles(runSeed) {
     }
   }
 
-  console.log(`[crawl-bundles] discovered=${discovered} acceptedPairs=${acceptedPairs} linkedAssets=${linkedAssets}`);
+  console.log(
+    `[crawl-bundles] discovered=${discovered} acceptedPairs=${acceptedPairs} linkedAssets=${linkedAssets}`
+  );
 }
 
 async function pruneInvalidShoeBundles() {
