@@ -35,9 +35,20 @@ const SHOE_RIGHT_TYPE = 71;
 const LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 70, 71, 72];
 const NON_SHOE_LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 72];
 const CLASSIC_CLOTHING_TYPES = [CLASSIC_TSHIRT_TYPE, CLASSIC_SHIRT_TYPE, CLASSIC_PANTS_TYPE];
+
+// Keep full accessory caching in DB (including hair), but exclude hair from Accessories UI "all".
 const ALL_ACCESSORY_TYPES = [
   HAT_ACCESSORY_TYPE,
   HAIR_ACCESSORY_TYPE,
+  FACE_ACCESSORY_TYPE,
+  NECK_ACCESSORY_TYPE,
+  SHOULDER_ACCESSORY_TYPE,
+  FRONT_ACCESSORY_TYPE,
+  BACK_ACCESSORY_TYPE,
+  WAIST_ACCESSORY_TYPE,
+];
+const ACCESSORY_UI_TYPES = [
+  HAT_ACCESSORY_TYPE,
   FACE_ACCESSORY_TYPE,
   NECK_ACCESSORY_TYPE,
   SHOULDER_ACCESSORY_TYPE,
@@ -79,14 +90,20 @@ const SUBTAB_ALIASES = {
   dresses_skirts: "dresses_skirts",
   shoes: "shoes",
 
-  hats: "hats",
-  hair: "hair",
-  faces: "faces",
+  // Accessories aliases
+  head: "head",
+  hats: "head",
+  hat: "head",
+  face: "face",
+  faces: "face",
   neck: "neck",
   shoulder: "shoulder",
   front: "front",
   back: "back",
   waist: "waist",
+
+  // Hair remains mapped for future Body tab use if you ever query it directly.
+  hair: "hair",
 };
 
 const TERM_ALIASES = {
@@ -301,15 +318,24 @@ function sanitizeItem(item) {
 
 function getSubtabSpec(category, subtab) {
   if (category === "accessories") {
-    if (subtab === "hats") return { mode: "accessory", allowedTypes: [HAT_ACCESSORY_TYPE] };
-    if (subtab === "hair") return { mode: "accessory", allowedTypes: [HAIR_ACCESSORY_TYPE] };
-    if (subtab === "faces") return { mode: "accessory", allowedTypes: [FACE_ACCESSORY_TYPE] };
+    // "Head" in accessories = hats/head accessories only.
+    if (subtab === "head" || subtab === "hats") {
+      return { mode: "accessory", allowedTypes: [HAT_ACCESSORY_TYPE] };
+    }
+
+    // "Face" in accessories includes face accessories (and any future face-like accessories routed here).
+    if (subtab === "face" || subtab === "faces") {
+      return { mode: "accessory", allowedTypes: [FACE_ACCESSORY_TYPE] };
+    }
+
     if (subtab === "neck") return { mode: "accessory", allowedTypes: [NECK_ACCESSORY_TYPE] };
     if (subtab === "shoulder") return { mode: "accessory", allowedTypes: [SHOULDER_ACCESSORY_TYPE] };
     if (subtab === "front") return { mode: "accessory", allowedTypes: [FRONT_ACCESSORY_TYPE] };
     if (subtab === "back") return { mode: "accessory", allowedTypes: [BACK_ACCESSORY_TYPE] };
     if (subtab === "waist") return { mode: "accessory", allowedTypes: [WAIST_ACCESSORY_TYPE] };
-    return { mode: "accessory", allowedTypes: ALL_ACCESSORY_TYPES };
+
+    // Accessories "all" excludes hair (41). Hair stays cached, but displayed later in Body > Hair.
+    return { mode: "accessory", allowedTypes: ACCESSORY_UI_TYPES };
   }
 
   if (subtab === "classic_shirts") return { mode: "classic", allowedTypes: [CLASSIC_SHIRT_TYPE] };
@@ -660,63 +686,6 @@ async function queryAllStrict(category, terms, fetchLimit, fetchOffset) {
   return rows.map((r) => (r.is_bundle_parent ? mapBundleRow(r) : mapItemRow(r)));
 }
 
-async function queryItemsByAllowedTypes(category, terms, allowedTypes, fallbackRegex, fetchLimit, fetchOffset) {
-  const params = [category, terms.phraseLike, terms.qNumeric, terms.tokenLikes, allowedTypes];
-  let where = `
-    WHERE lower(coalesce(i.category, '')) = $1
-      AND (
-        $2::text IS NULL
-        OR lower(coalesce(i.name,'')) LIKE $2
-        OR lower(coalesce(i.creator_name,'')) LIKE $2
-        OR ($3::bigint IS NOT NULL AND i.asset_id = $3)
-        OR ($4::text[] IS NOT NULL AND lower(coalesce(i.name,'')) LIKE ANY($4::text[]))
-        OR ($4::text[] IS NOT NULL AND lower(coalesce(i.creator_name,'')) LIKE ANY($4::text[]))
-      )
-  `;
-
-  let orderSql = "i.updated_at DESC, i.asset_id DESC";
-
-  if (fallbackRegex) {
-    params.push(fallbackRegex);
-    const regexIdx = params.length;
-    where += `
-      AND (
-        i.asset_type_id = ANY($5::int[])
-        OR (
-          i.asset_type_id = ANY($6::int[])
-          AND lower(coalesce(i.name,'')) ~ $${regexIdx}
-        )
-      )
-    `;
-    params.splice(5, 0, allowedTypes[1]); // not used here in this helper
-  } else {
-    where += ` AND i.asset_type_id = ANY($5::int[])`;
-  }
-
-  params.push(fetchLimit, fetchOffset);
-
-  const sql = `
-    SELECT
-      i.*,
-      0 AS sort_bucket,
-      CASE
-        WHEN lower(coalesce(i.creator_type, '')) = 'group' AND i.creator_id IS NOT NULL
-          THEN 'rbxthumb://type=GroupIcon&id=' || i.creator_id::text || '&w=150&h=150'
-        WHEN i.creator_id IS NOT NULL
-          THEN 'rbxthumb://type=AvatarHeadShot&id=' || i.creator_id::text || '&w=150&h=150'
-        ELSE '${PLACEHOLDER}'
-      END AS creator_avatar_url
-    FROM public.catalog_items i
-    ${where}
-    ORDER BY ${orderSql}
-    LIMIT $${params.length - 1}
-    OFFSET $${params.length};
-  `;
-
-  const { rows } = await pool.query(sql, params);
-  return rows.map(mapItemRow);
-}
-
 async function queryLayeredOrClassic(category, terms, spec, fetchLimit, fetchOffset) {
   const params = [category, terms.phraseLike, terms.qNumeric, terms.tokenLikes];
   let where = `
@@ -803,7 +772,7 @@ app.get("/catalog/search", async (req, reply) => {
     const terms = buildSearchTerms(req.query.q || "");
     const hasQuery = terms.normalized.length > 0;
 
-    const cacheKey = `search:v31:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
+    const cacheKey = `search:v33:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
