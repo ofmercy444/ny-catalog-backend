@@ -34,6 +34,8 @@ const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_P
 const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 8);
 const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 8);
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 18);
+const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 24);
+const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 3);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 6);
 console.log("[startup] crawler config", {
@@ -203,6 +205,39 @@ const SHOE_BUNDLE_KEYWORDS = [
   "block heels",
   "slingback heels",
   "court shoes",
+];
+
+const HAIR_FOCUS_KEYWORDS = [
+  "hair accessory",
+  "hair",
+  "bangs",
+  "fringe",
+  "ponytail",
+  "pigtails",
+  "braids",
+  "curly hair",
+  "straight hair",
+  "wavy hair",
+  "long hair",
+  "short hair",
+  "bob hair",
+  "wolf cut",
+  "mullet hair",
+  "messy hair",
+  "anime hair",
+  "y2k hair",
+  "coquette hair",
+  "layered hair",
+  "alt hair",
+  "emo hair",
+  "goth hair",
+  "scene hair",
+  "blonde hair",
+  "brown hair",
+  "black hair",
+  "white hair",
+  "pink hair",
+  "blue hair",
 ];
 
 const memoryAssetTypeCache = new Map();
@@ -799,6 +834,69 @@ async function crawlPass(pass, tabKey, mode) {
   );
 }
 
+async function crawlHairFocused(runSeed) {
+  const hairTerms = rotatedSlice(
+    HAIR_FOCUS_KEYWORDS,
+    MAX_HAIR_TERMS_PER_RUN,
+    `${runSeed}:hairfocus`
+  );
+
+  let totalSeen = 0;
+  let totalUpserts = 0;
+
+  for (const keyword of hairTerms) {
+    for (const categoryId of [11, 13, CLOTHING_CATEGORY]) {
+      let cursor = null;
+      let pages = 0;
+
+      while (pages < HAIR_FOCUS_PAGES) {
+        const url = buildSearchUrl({
+          category: categoryId,
+          keyword,
+          cursor,
+          limit: PAGE_LIMIT,
+        });
+
+        const json = await fetchJsonWithRetry(url, SEARCH_RETRIES, `hair-focus:${keyword}:cat${categoryId}`);
+        if (!json) break;
+
+        const rows = Array.isArray(json.data) ? json.data : [];
+        if (rows.length === 0) break;
+
+        const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
+        await enrichAssetTypes(items);
+
+        let upserts = 0;
+        for (const item of items) {
+          const t = item.asset_type_id == null ? null : Number(item.asset_type_id);
+          if (t !== HAIR_ACCESSORY_TYPE) {
+            continue;
+          }
+          const classified = classifyByType(t, "accessories", "hair");
+          item.category = classified.category;
+          item.subcategory = classified.subcategory;
+          await upsertItem(item);
+          upserts += 1;
+        }
+
+        totalSeen += items.length;
+        totalUpserts += upserts;
+        pages += 1;
+
+        console.log(
+          `[crawl-hair] kw="${keyword}" cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts}`
+        );
+
+        cursor = json.nextPageCursor || null;
+        if (!cursor) break;
+        await sleep(DELAY_MS + jitter(700));
+      }
+    }
+  }
+
+  console.log(`[crawl-hair] totalSeen=${totalSeen} totalUpserts=${totalUpserts}`);
+}
+
 async function crawlShoeBundles(runSeed) {
   const seenBundles = new Set();
   let discovered = 0;
@@ -990,6 +1088,8 @@ async function main() {
         await sleep(DELAY_MS + jitter(500));
       }
     }
+
+    await crawlHairFocused(runSeed);
 
     await crawlShoeBundles(runSeed);
     await pruneInvalidShoeBundles();
