@@ -38,6 +38,7 @@ const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN |
 const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 24);
 const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 3);
 const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 800);
+const HAIR_DIRECT_PAGES = Number(process.env.CRAWL_HAIR_DIRECT_PAGES || 8);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 6);
 
@@ -927,6 +928,59 @@ async function crawlHairFocused(runSeed) {
   console.log(`[crawl-hair] totalSeen=${totalSeen} totalUpserts=${totalUpserts}`);
 }
 
+async function crawlHairDirectSubcategory() {
+  let cursor = null;
+  let pages = 0;
+  let totalSeen = 0;
+  let totalUpserts = 0;
+
+  while (pages < HAIR_DIRECT_PAGES) {
+    const url = buildSearchUrl({
+      category: 11,
+      keyword: "",
+      cursor,
+      limit: PAGE_LIMIT,
+      subcategory: "HairAccessory",
+    });
+
+    const json = await fetchJsonWithRetry(url, SEARCH_RETRIES, "hair-direct:cat11");
+    if (!json) break;
+
+    const rows = Array.isArray(json.data) ? json.data : [];
+    if (rows.length === 0) break;
+
+    const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
+    let upserts = 0;
+
+    for (const item of items) {
+      item.asset_type_id = HAIR_ACCESSORY_TYPE;
+      if (!String(item.asset_type_name || "").trim()) {
+        item.asset_type_name = "HairAccessory";
+      }
+      item.category = "accessories";
+      item.subcategory = "hair";
+      await upsertItem(item);
+      upserts += 1;
+    }
+
+    totalSeen += items.length;
+    totalUpserts += upserts;
+    pages += 1;
+
+    console.log(
+      `[crawl-hair-direct] pages=${pages} seen=${items.length} upserts=${upserts}`
+    );
+
+    cursor = json.nextPageCursor || null;
+    if (!cursor) break;
+    await sleep(DELAY_MS + jitter(500));
+  }
+
+  console.log(
+    `[crawl-hair-direct] totalSeen=${totalSeen} totalUpserts=${totalUpserts}`
+  );
+}
+
 async function crawlShoeBundles(runSeed) {
   const seenBundles = new Set();
   let discovered = 0;
@@ -1102,6 +1156,7 @@ async function main() {
     const { clothingPlan, accessoryPlan } = buildPlan(runSeed);
 
     // Hair first so 41 ingestion isn't starved by earlier passes.
+    await crawlHairDirectSubcategory();
     await crawlHairFocused(runSeed);
 
     for (const tab of clothingPlan) {
