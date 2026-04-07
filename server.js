@@ -84,6 +84,24 @@ const ACCESSORY_SUBTAB_ALIASES = {
   hair: "hair",
 };
 
+const ACCESSORY_SUBTAB_SET = new Set(Object.values(ACCESSORY_SUBTAB_ALIASES));
+const CLOTHING_SUBTAB_SET = new Set(Object.values(CLOTHING_SUBTAB_ALIASES));
+
+function normalizeCategory(rawCategory, rawSubtab) {
+  const c = String(rawCategory || "").toLowerCase().trim();
+  const s = String(rawSubtab || "").toLowerCase().trim();
+
+  if (c === "accessories" || c === "accessory") return "accessories";
+  if (c === "clothing" || c === "clothes" || c === "apparel") return "clothing";
+
+  // Infer category from known subtab when callers send odd category values.
+  if (ACCESSORY_SUBTAB_SET.has(ACCESSORY_SUBTAB_ALIASES[s] || s)) return "accessories";
+  if (CLOTHING_SUBTAB_SET.has(CLOTHING_SUBTAB_ALIASES[s] || s)) return "clothing";
+
+  // Safe default so UI does not blank out.
+  return "clothing";
+}
+
 function normalizeTabKey(raw, category) {
   const cleaned = String(raw || "all")
     .toLowerCase()
@@ -246,7 +264,7 @@ app.get("/catalog/search", async (req, reply) => {
   try {
     await ensureSchemaOnce();
 
-    const category = String(req.query.category || "clothing").toLowerCase();
+    const category = normalizeCategory(req.query.category, req.query.subtab);
     const subtab = normalizeTabKey(req.query.subtab || "all", category);
     const q = String(req.query.q || "").trim().toLowerCase();
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
