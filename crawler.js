@@ -34,11 +34,13 @@ const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_P
 const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 8);
 const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 8);
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 18);
+
 const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 24);
 const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 3);
 const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 800);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 6);
+
 console.log("[startup] crawler config", {
   CRAWL_PAGE_LIMIT_raw: process.env.CRAWL_PAGE_LIMIT,
   PAGE_LIMIT_computed: PAGE_LIMIT,
@@ -128,7 +130,6 @@ const CLOTHING_KEYWORDS = {
   classic_shirts: ["classic shirt", "2d shirt", "template shirt", "legacy shirt", "retro shirt"],
   classic_pants: ["classic pants", "2d pants", "template pants", "legacy pants", "retro pants"],
   classic_t_shirts: ["classic t-shirt", "classic tee", "2d t shirt", "graphic classic tee"],
-
   shirts: ["layered shirt", "shirt", "top", "blouse", "crop top", "baby tee", "cami", "tank top"],
   jackets: ["layered jacket", "jacket", "hoodie", "coat", "bomber jacket", "puffer", "windbreaker", "blazer"],
   sweaters: ["layered sweater", "sweater", "cardigan", "knit", "pullover", "crewneck", "turtleneck", "chunky knit"],
@@ -322,6 +323,7 @@ function isShoeLikeTitle(name) {
 function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
   const url = new URL("https://catalog.roblox.com/v1/search/items/details");
   const finalLimit = Number(limit || PAGE_LIMIT);
+
   console.log("[debug] using search limit", {
     category,
     keyword: keyword || "",
@@ -329,15 +331,18 @@ function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
     requested_limit: limit ?? null,
     final_limit: finalLimit,
   });
+
   url.searchParams.set("Category", String(category));
   url.searchParams.set("Limit", String(finalLimit));
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
+
   if (subcategory && String(subcategory).trim()) {
     url.searchParams.set("Subcategory", String(subcategory).trim());
   }
   if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
   if (cursor) url.searchParams.set("Cursor", cursor);
+
   return url.toString();
 }
 
@@ -884,6 +889,7 @@ async function crawlHairFocused(runSeed) {
         let upserts = 0;
         for (const item of items) {
           let t = item.asset_type_id == null ? null : Number(item.asset_type_id);
+
           if (t == null && forcedMetaLookups < HAIR_META_LOOKUPS_PER_RUN) {
             const details = await fetchAssetDetailsWithRetry(item.asset_id);
             if (details) {
@@ -895,9 +901,9 @@ async function crawlHairFocused(runSeed) {
             forcedMetaLookups += 1;
             await sleep(ASSET_META_DELAY_MS);
           }
-          if (t !== HAIR_ACCESSORY_TYPE) {
-            continue;
-          }
+
+          if (t !== HAIR_ACCESSORY_TYPE) continue;
+
           const classified = classifyByType(t, "accessories", "hair");
           item.category = classified.category;
           item.subcategory = classified.subcategory;
