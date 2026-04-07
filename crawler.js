@@ -953,10 +953,11 @@ async function crawlHairDirectSubcategory() {
     let upserts = 0;
 
     for (const item of items) {
+      const hasExplicitHairType = Number(item.asset_type_id) === HAIR_ACCESSORY_TYPE;
+      const looksHairLike = isHairLikeTitle(item.name);
+      if (!hasExplicitHairType && !looksHairLike) continue;
       item.asset_type_id = HAIR_ACCESSORY_TYPE;
-      if (!String(item.asset_type_name || "").trim()) {
-        item.asset_type_name = "HairAccessory";
-      }
+      item.asset_type_name = "HairAccessory";
       item.category = "accessories";
       item.subcategory = "hair";
       await upsertItem(item);
