@@ -28,6 +28,7 @@ const SHOULDER_ACCESSORY_TYPE = 44;
 const FRONT_ACCESSORY_TYPE = 45;
 const BACK_ACCESSORY_TYPE = 46;
 const WAIST_ACCESSORY_TYPE = 47;
+const HAIR_TITLE_REGEX = "(hair|bang|fringe|ponytail|pigtail|braid|bob|wolf[ -]?cut|mullet)";
 
 const LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 70, 71, 72];
 const ACCESSORY_UI_TYPES = [
@@ -294,6 +295,10 @@ app.get("/catalog/search", async (req, reply) => {
       where += ` AND i.asset_type_id = ANY($${params.length + 1}::int[])`;
       params.push(spec.allowedTypes);
       // strict typed filtering for accessory/classic tabs
+      if (category === "accessories" && subtab === "hair") {
+        where += ` AND lower(coalesce(i.name,'')) ~ $${params.length + 1}`;
+        params.push(HAIR_TITLE_REGEX);
+      }
     } else if (spec.mode === "layered") {
       const layeredParamIdx = params.length + 1;
       params.push(spec.layeredTypes);
