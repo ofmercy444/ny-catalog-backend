@@ -36,6 +36,7 @@ const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_R
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 18);
 const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 24);
 const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 3);
+const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 800);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 6);
 console.log("[startup] crawler config", {
@@ -318,7 +319,7 @@ function isShoeLikeTitle(name) {
   );
 }
 
-function buildSearchUrl({ category, keyword, cursor, limit }) {
+function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
   const url = new URL("https://catalog.roblox.com/v1/search/items/details");
   const finalLimit = Number(limit || PAGE_LIMIT);
   console.log("[debug] using search limit", {
@@ -332,6 +333,9 @@ function buildSearchUrl({ category, keyword, cursor, limit }) {
   url.searchParams.set("Limit", String(finalLimit));
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
+  if (subcategory && String(subcategory).trim()) {
+    url.searchParams.set("Subcategory", String(subcategory).trim());
+  }
   if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
   if (cursor) url.searchParams.set("Cursor", cursor);
   return url.toString();
@@ -843,6 +847,7 @@ async function crawlHairFocused(runSeed) {
 
   let totalSeen = 0;
   let totalUpserts = 0;
+  let forcedMetaLookups = 0;
 
   for (const keyword of hairTerms) {
     for (const categoryId of [11, 13, CLOTHING_CATEGORY]) {
@@ -850,14 +855,24 @@ async function crawlHairFocused(runSeed) {
       let pages = 0;
 
       while (pages < HAIR_FOCUS_PAGES) {
-        const url = buildSearchUrl({
+        const strictUrl = buildSearchUrl({
           category: categoryId,
           keyword,
           cursor,
           limit: PAGE_LIMIT,
+          subcategory: "HairAccessory",
         });
 
-        const json = await fetchJsonWithRetry(url, SEARCH_RETRIES, `hair-focus:${keyword}:cat${categoryId}`);
+        let json = await fetchJsonWithRetry(strictUrl, SEARCH_RETRIES, `hair-focus-strict:${keyword}:cat${categoryId}`);
+        if (!json) {
+          const fallbackUrl = buildSearchUrl({
+            category: categoryId,
+            keyword,
+            cursor,
+            limit: PAGE_LIMIT,
+          });
+          json = await fetchJsonWithRetry(fallbackUrl, SEARCH_RETRIES, `hair-focus-fallback:${keyword}:cat${categoryId}`);
+        }
         if (!json) break;
 
         const rows = Array.isArray(json.data) ? json.data : [];
@@ -868,7 +883,18 @@ async function crawlHairFocused(runSeed) {
 
         let upserts = 0;
         for (const item of items) {
-          const t = item.asset_type_id == null ? null : Number(item.asset_type_id);
+          let t = item.asset_type_id == null ? null : Number(item.asset_type_id);
+          if (t == null && forcedMetaLookups < HAIR_META_LOOKUPS_PER_RUN) {
+            const details = await fetchAssetDetailsWithRetry(item.asset_id);
+            if (details) {
+              const meta = extractAssetMeta(details);
+              item.asset_type_id = meta.asset_type_id;
+              item.asset_type_name = meta.asset_type_name;
+              t = meta.asset_type_id == null ? null : Number(meta.asset_type_id);
+            }
+            forcedMetaLookups += 1;
+            await sleep(ASSET_META_DELAY_MS);
+          }
           if (t !== HAIR_ACCESSORY_TYPE) {
             continue;
           }
@@ -884,7 +910,7 @@ async function crawlHairFocused(runSeed) {
         pages += 1;
 
         console.log(
-          `[crawl-hair] kw="${keyword}" cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts}`
+          `[crawl-hair] kw="${keyword}" cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts} forcedMetaLookups=${forcedMetaLookups}`
         );
 
         cursor = json.nextPageCursor || null;
