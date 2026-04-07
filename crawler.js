@@ -321,6 +321,21 @@ function isShoeLikeTitle(name) {
   );
 }
 
+function isHairLikeTitle(name) {
+  const n = String(name || "").toLowerCase();
+  return (
+    n.includes("hair") ||
+    n.includes("bang") ||
+    n.includes("fringe") ||
+    n.includes("ponytail") ||
+    n.includes("pigtail") ||
+    n.includes("braid") ||
+    n.includes("bob") ||
+    n.includes("wolf cut") ||
+    n.includes("mullet")
+  );
+}
+
 function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
   const url = new URL("https://catalog.roblox.com/v1/search/items/details");
   const finalLimit = Number(limit || PAGE_LIMIT);
