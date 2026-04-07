@@ -35,8 +35,6 @@ const SHOE_RIGHT_TYPE = 71;
 const LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 70, 71, 72];
 const NON_SHOE_LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 72];
 const CLASSIC_CLOTHING_TYPES = [CLASSIC_TSHIRT_TYPE, CLASSIC_SHIRT_TYPE, CLASSIC_PANTS_TYPE];
-
-// Keep full accessory caching in DB (including hair), but exclude hair from Accessories UI "all".
 const ALL_ACCESSORY_TYPES = [
   HAT_ACCESSORY_TYPE,
   HAIR_ACCESSORY_TYPE,
@@ -47,6 +45,8 @@ const ALL_ACCESSORY_TYPES = [
   BACK_ACCESSORY_TYPE,
   WAIST_ACCESSORY_TYPE,
 ];
+
+// Accessories UI "all" excludes hair (41). Hair remains cached in DB for Body>Hair later.
 const ACCESSORY_UI_TYPES = [
   HAT_ACCESSORY_TYPE,
   FACE_ACCESSORY_TYPE,
@@ -94,15 +94,17 @@ const SUBTAB_ALIASES = {
   head: "head",
   hats: "head",
   hat: "head",
+
   face: "face",
   faces: "face",
+
   neck: "neck",
   shoulder: "shoulder",
   front: "front",
   back: "back",
   waist: "waist",
 
-  // Hair remains mapped for future Body tab use if you ever query it directly.
+  // Kept for future Body>Hair queries if needed
   hair: "hair",
 };
 
@@ -318,23 +320,14 @@ function sanitizeItem(item) {
 
 function getSubtabSpec(category, subtab) {
   if (category === "accessories") {
-    // "Head" in accessories = hats/head accessories only.
-    if (subtab === "head" || subtab === "hats") {
-      return { mode: "accessory", allowedTypes: [HAT_ACCESSORY_TYPE] };
-    }
-
-    // "Face" in accessories includes face accessories (and any future face-like accessories routed here).
-    if (subtab === "face" || subtab === "faces") {
-      return { mode: "accessory", allowedTypes: [FACE_ACCESSORY_TYPE] };
-    }
-
+    if (subtab === "head") return { mode: "accessory", allowedTypes: [HAT_ACCESSORY_TYPE] };
+    if (subtab === "face") return { mode: "accessory", allowedTypes: [FACE_ACCESSORY_TYPE] };
     if (subtab === "neck") return { mode: "accessory", allowedTypes: [NECK_ACCESSORY_TYPE] };
     if (subtab === "shoulder") return { mode: "accessory", allowedTypes: [SHOULDER_ACCESSORY_TYPE] };
     if (subtab === "front") return { mode: "accessory", allowedTypes: [FRONT_ACCESSORY_TYPE] };
     if (subtab === "back") return { mode: "accessory", allowedTypes: [BACK_ACCESSORY_TYPE] };
     if (subtab === "waist") return { mode: "accessory", allowedTypes: [WAIST_ACCESSORY_TYPE] };
-
-    // Accessories "all" excludes hair (41). Hair stays cached, but displayed later in Body > Hair.
+    if (subtab === "hair") return { mode: "accessory", allowedTypes: [HAIR_ACCESSORY_TYPE] }; // future Body tab
     return { mode: "accessory", allowedTypes: ACCESSORY_UI_TYPES };
   }
 
@@ -772,7 +765,7 @@ app.get("/catalog/search", async (req, reply) => {
     const terms = buildSearchTerms(req.query.q || "");
     const hasQuery = terms.normalized.length > 0;
 
-    const cacheKey = `search:v33:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
+    const cacheKey = `search:v34:${category}:${subtab}:${terms.normalized}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
