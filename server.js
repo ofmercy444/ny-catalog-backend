@@ -28,7 +28,8 @@ const SHOULDER_ACCESSORY_TYPE = 44;
 const FRONT_ACCESSORY_TYPE = 45;
 const BACK_ACCESSORY_TYPE = 46;
 const WAIST_ACCESSORY_TYPE = 47;
-const HAIR_TITLE_REGEX = "(hair|bang|fringe|ponytail|pigtail|braid|bob|wolf[ -]?cut|mullet)";
+const HAIR_TITLE_REGEX =
+  "(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|bun|braids?|twists?|locs?|dreads?|afro|coily|curly|wavy|straight|layers?|bob|pixie|wolf[ -]?cut|mullet)";
 
 const LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 70, 71, 72];
 const ACCESSORY_UI_TYPES = [
@@ -272,7 +273,7 @@ app.get("/catalog/search", async (req, reply) => {
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
     // cache namespace bump
-    const cacheKey = `search:v12:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v13:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
