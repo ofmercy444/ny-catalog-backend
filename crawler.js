@@ -320,6 +320,21 @@ function isShoeLikeTitle(name) {
   );
 }
 
+function isHairLikeTitle(name) {
+  const n = String(name || "").toLowerCase();
+  return (
+    n.includes("hair") ||
+    n.includes("bang") ||
+    n.includes("fringe") ||
+    n.includes("ponytail") ||
+    n.includes("pigtail") ||
+    n.includes("braid") ||
+    n.includes("bob") ||
+    n.includes("wolf cut") ||
+    n.includes("mullet")
+  );
+}
+
 function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
   const url = new URL("https://catalog.roblox.com/v1/search/items/details");
   const finalLimit = Number(limit || PAGE_LIMIT);
@@ -852,7 +867,7 @@ async function crawlHairFocused(runSeed) {
   let forcedMetaLookups = 0;
 
   for (const keyword of hairTerms) {
-    for (const categoryId of [11, 13, CLOTHING_CATEGORY]) {
+    for (const categoryId of [11, CLOTHING_CATEGORY]) {
       let cursor = null;
       let pages = 0;
 
@@ -862,7 +877,7 @@ async function crawlHairFocused(runSeed) {
           keyword,
           cursor,
           limit: PAGE_LIMIT,
-          subcategory: "HairAccessory",
+          subcategory: categoryId === 11 ? "HairAccessory" : null,
         });
 
         let json = await fetchJsonWithRetry(strictUrl, SEARCH_RETRIES, `hair-focus-strict:${keyword}:cat${categoryId}`);
@@ -886,8 +901,12 @@ async function crawlHairFocused(runSeed) {
         let upserts = 0;
         for (const item of items) {
           let t = item.asset_type_id == null ? null : Number(item.asset_type_id);
+          const shouldForceLookup =
+            forcedMetaLookups < HAIR_META_LOOKUPS_PER_RUN &&
+            (t == null || t !== HAIR_ACCESSORY_TYPE) &&
+            isHairLikeTitle(item.name);
 
-          if (t == null && forcedMetaLookups < HAIR_META_LOOKUPS_PER_RUN) {
+          if (shouldForceLookup) {
             const details = await fetchAssetDetailsWithRetry(item.asset_id);
             if (details) {
               const meta = extractAssetMeta(details);
