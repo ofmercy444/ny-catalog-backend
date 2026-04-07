@@ -336,7 +336,6 @@ function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
   url.searchParams.set("Limit", String(finalLimit));
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
-
   if (subcategory && String(subcategory).trim()) {
     url.searchParams.set("Subcategory", String(subcategory).trim());
   }
@@ -813,9 +812,7 @@ async function crawlPass(pass, tabKey, mode) {
     for (const item of items) {
       const t = item.asset_type_id == null ? null : Number(item.asset_type_id);
 
-      if (mode === "accessory_type_target" && t !== pass.targetTypeId) {
-        continue;
-      }
+      if (mode === "accessory_type_target" && t !== pass.targetTypeId) continue;
 
       const classified = classifyByType(
         t,
@@ -954,7 +951,6 @@ async function crawlShoeBundles(runSeed) {
         if (!json) break;
 
         const rows = Array.isArray(json.data) ? json.data : [];
-
         for (const raw of rows) {
           const bundleId = Number(raw.id);
           if (!Number.isFinite(bundleId)) continue;
@@ -1061,9 +1057,7 @@ async function crawlShoeBundles(runSeed) {
     }
   }
 
-  console.log(
-    `[crawl-bundles] discovered=${discovered} acceptedPairs=${acceptedPairs} linkedAssets=${linkedAssets}`
-  );
+  console.log(`[crawl-bundles] discovered=${discovered} acceptedPairs=${acceptedPairs} linkedAssets=${linkedAssets}`);
 }
 
 async function pruneInvalidShoeBundles() {
@@ -1106,6 +1100,9 @@ async function main() {
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
     const { clothingPlan, accessoryPlan } = buildPlan(runSeed);
 
+    // Hair first so 41 ingestion isn't starved by earlier passes.
+    await crawlHairFocused(runSeed);
+
     for (const tab of clothingPlan) {
       for (const pass of tab.passes) {
         await crawlPass(pass, tab.tabKey, "clothing");
@@ -1120,8 +1117,6 @@ async function main() {
         await sleep(DELAY_MS + jitter(500));
       }
     }
-
-    await crawlHairFocused(runSeed);
 
     await crawlShoeBundles(runSeed);
     await pruneInvalidShoeBundles();
