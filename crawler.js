@@ -249,6 +249,16 @@ function normalizeTypeName(name) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function resolveTypeNameNormalized(item = {}) {
+  return normalizeTypeName(
+    item?.assetTypeName ||
+      item?.assetTypeDisplayName ||
+      item?.assetType ||
+      item?.AssetTypeName ||
+      ""
+  );
+}
+
 function asNumber(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -643,7 +653,12 @@ async function upsertCatalogItem(record) {
   return true;
 }
 
-async function processSearchPage(items, metaLookupBudget, requiredAssetTypeId = null) {
+async function processSearchPage(
+  items,
+  metaLookupBudget,
+  requiredAssetTypeId = null,
+  requiredAssetTypeNameNormalized = null
+) {
   let seen = 0;
   let upserts = 0;
   let forcedMetaLookups = 0;
@@ -664,11 +679,34 @@ async function processSearchPage(items, metaLookupBudget, requiredAssetTypeId = 
       await sleep(ASSET_META_DELAY_MS + jitter(300));
     }
 
+    if (!resolvedTypeId) {
+      const normalizedName = resolveTypeNameNormalized({ assetTypeName: resolvedTypeName });
+      if (normalizedName === "hairaccessory") {
+        resolvedTypeId = 41;
+        resolvedTypeName = "HairAccessory";
+      }
+    }
+
     if (
       requiredAssetTypeId !== null &&
       Number(resolvedTypeId) !== Number(requiredAssetTypeId)
     ) {
       continue;
+    }
+
+    if (requiredAssetTypeNameNormalized) {
+      const normalizedResolved = resolveTypeNameNormalized({
+        assetTypeName: resolvedTypeName,
+      });
+      const normalizedItem = resolveTypeNameNormalized(item);
+      const normalizedDetail = resolveTypeNameNormalized(detail || {});
+      const nameMatched =
+        normalizedResolved === requiredAssetTypeNameNormalized ||
+        normalizedItem === requiredAssetTypeNameNormalized ||
+        normalizedDetail === requiredAssetTypeNameNormalized;
+      if (!nameMatched) {
+        continue;
+      }
     }
 
     const mapped = mapCommonFields(item, detail, resolvedTypeId, resolvedTypeName);
@@ -686,6 +724,7 @@ async function crawlSearchLane({
   maxPages = 1,
   maxMetaLookups = MAX_META_LOOKUPS_PER_PASS,
   requiredAssetTypeId = null,
+  requiredAssetTypeNameNormalized = null,
 }) {
   let cursor = null;
   let pages = 0;
@@ -722,7 +761,8 @@ async function crawlSearchLane({
     const { seen, upserts, forcedMetaLookups } = await processSearchPage(
       filteredItems,
       budget,
-      requiredAssetTypeId
+      requiredAssetTypeId,
+      requiredAssetTypeNameNormalized
     );
 
     pages += 1;
@@ -850,6 +890,7 @@ function buildPlans(runSeed) {
           subcategory: null,
           keyword: kw,
           requiredAssetTypeId: null,
+          requiredAssetTypeNameNormalized: typeId === 41 ? "hairaccessory" : null,
         });
       }
     }
@@ -1008,6 +1049,7 @@ async function main() {
           maxPages: MAX_ACCESSORY_PAGES_PER_PASS,
           maxMetaLookups: MAX_META_LOOKUPS_PER_PASS,
           requiredAssetTypeId: pass.requiredAssetTypeId ?? null,
+          requiredAssetTypeNameNormalized: pass.requiredAssetTypeNameNormalized ?? null,
         });
         await sleep(DELAY_MS + jitter(500));
       }

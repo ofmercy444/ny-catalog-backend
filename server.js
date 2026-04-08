@@ -414,7 +414,7 @@ app.get("/catalog/search", async (req, reply) => {
     } else if (category === "body" && spec.mode === "body_hair") {
       const params = [];
       let where = `
-        WHERE i.asset_type_id = ${HAIR_ACCESSORY_TYPE}
+        WHERE lower(regexp_replace(coalesce(i.asset_type_name, ''), '[^a-z0-9]+', '', 'g')) = 'hairaccessory'
       `;
 
       if (q.length > 0) {
