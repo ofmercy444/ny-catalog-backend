@@ -22,29 +22,34 @@ const MAX_CLOTHING_PAGES_PER_PASS = Number(
 const MAX_ACCESSORY_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_ACCESSORY_PASS ??
     process.env.CRAWL_PAGES_PER_SUBTAB ??
-    2
+    1
 );
 
 const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 0);
 
-const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 6500);
-const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 1300);
+const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 11000);
+const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 1700);
 const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 1);
-const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 3);
+const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 0);
+const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 2);
 const RETRY_BASE_MS = Number(process.env.CRAWL_RETRY_BASE_MS || 1200);
 const MAX_RETRY_BACKOFF_MS = Number(process.env.CRAWL_MAX_RETRY_BACKOFF_MS || 12000);
 
-const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 180000);
-const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 8);
+const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 240000);
+const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 14);
 
-const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 120);
+const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 60);
 
-const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_PER_TAB || 6);
-const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 16);
-const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 8);
+const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_PER_TAB || 2);
+const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 4);
+const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 2);
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 0);
+
+const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 0);
+const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 0);
+const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 0);
+const HAIR_DIRECT_PAGES = Number(process.env.CRAWL_HAIR_DIRECT_PAGES || 0);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 2);
 
@@ -135,31 +140,31 @@ const ASSET_TYPE_NAME_TO_ID = {
 };
 
 const CLOTHING_KEYWORDS = {
-  all: ["", "y2k", "coquette", "streetwear", "vintage", "retro", "high fashion", "editorial inspired"],
-  classic_shirts: ["classic shirt", "2d shirt", "template shirt", "legacy shirt", "retro shirt"],
-  classic_pants: ["classic pants", "2d pants", "template pants", "legacy pants", "retro pants"],
-  classic_t_shirts: ["classic t-shirt", "classic tee", "2d t shirt", "graphic classic tee"],
-  shirts: ["layered shirt", "shirt", "top", "blouse", "crop top", "baby tee", "cami", "tank top"],
-  jackets: ["layered jacket", "jacket", "hoodie", "coat", "bomber jacket", "puffer", "windbreaker", "blazer"],
-  sweaters: ["layered sweater", "sweater", "cardigan", "knit", "pullover", "crewneck", "turtleneck", "chunky knit"],
-  t_shirts: ["layered t shirt", "t-shirt", "tee", "graphic tee", "vintage tee", "logo tee", "oversized tee", "band tee"],
-  pants: ["layered pants", "pants", "jeans", "cargo pants", "joggers", "sweatpants", "wide leg pants", "flare pants"],
-  shorts: ["layered shorts", "shorts", "denim shorts", "cargo shorts", "athletic shorts", "bike shorts", "running shorts", "jorts"],
-  dresses_skirts: ["layered dress", "layered skirt", "dress", "skirt", "mini dress", "maxi dress", "pleated skirt", "bodycon dress"],
+  all: ["", "y2k", "vintage", "streetwear", "retro", "high fashion"],
+  classic_shirts: ["classic shirt", "2d shirt"],
+  classic_pants: ["classic pants", "2d pants"],
+  classic_t_shirts: ["classic t-shirt", "classic tee"],
+  shirts: ["layered shirt", "shirt"],
+  jackets: ["layered jacket", "jacket"],
+  sweaters: ["layered sweater", "sweater"],
+  t_shirts: ["layered t shirt", "t-shirt"],
+  pants: ["layered pants", "pants"],
+  shorts: ["layered shorts", "shorts"],
+  dresses_skirts: ["layered dress", "dress", "skirt"],
 };
 
 const ACCESSORY_KEYWORDS = {
-  [HAT_ACCESSORY_TYPE]: ["hat", "head accessory", "headband", "beanie", "cap", "beret", "helmet", "bucket hat", "tiara"],
+  [HAT_ACCESSORY_TYPE]: ["hat", "headband", "beanie", "cap"],
   [HAIR_ACCESSORY_TYPE]: ["hair", "hairstyle", "wig", "ponytail", "braid", "bob", "pixie", "wolf cut", "mullet"],
-  [FACE_ACCESSORY_TYPE]: ["face accessory", "bangs", "fringe", "mask", "glasses", "goggles", "visor", "sunglasses"],
-  [NECK_ACCESSORY_TYPE]: ["neck accessory", "necklace", "choker", "scarf", "tie", "pendant"],
-  [SHOULDER_ACCESSORY_TYPE]: ["shoulder accessory", "shoulder pet", "shoulder plush", "pauldron", "shoulder bag"],
-  [FRONT_ACCESSORY_TYPE]: ["front accessory", "crossbody", "front bag", "harness", "front pouch"],
-  [BACK_ACCESSORY_TYPE]: ["back accessory", "backpack", "wings", "cape", "jetpack", "guitar back"],
-  [WAIST_ACCESSORY_TYPE]: ["waist accessory", "belt", "waist chain", "fanny pack", "hip bag", "utility belt"],
+  [FACE_ACCESSORY_TYPE]: ["face accessory", "bangs", "fringe", "mask", "glasses"],
+  [NECK_ACCESSORY_TYPE]: ["neck accessory", "necklace", "choker", "scarf"],
+  [SHOULDER_ACCESSORY_TYPE]: ["shoulder accessory", "shoulder pet", "pauldron"],
+  [FRONT_ACCESSORY_TYPE]: ["front accessory", "crossbody", "harness"],
+  [BACK_ACCESSORY_TYPE]: ["back accessory", "backpack", "wings", "cape"],
+  [WAIST_ACCESSORY_TYPE]: ["waist accessory", "belt", "waist chain"],
 };
 
-// Shared discovery terms applied across accessory lanes (coverage-first)
+// Shared discovery terms are now run in a dedicated shared pass (not blasted into all type lanes)
 const ACCESSORY_SHARED_DISCOVERY_TERMS = [
   "hair",
   "hairstyle",
@@ -177,32 +182,11 @@ const ACCESSORY_SHARED_DISCOVERY_TERMS = [
   "emo",
   "punk",
   "grunge",
-  "kawaii",
 ];
 
-const GLOBAL_STYLE_TERMS = [
-  "high fashion",
-  "runway inspired",
-  "editorial inspired",
-  "luxury streetwear",
-  "quiet luxury",
-  "loud luxury",
-  "street luxe",
-  "urban chic",
-  "capsule wardrobe",
-  "signature style",
-];
+const GLOBAL_STYLE_TERMS = ["high fashion", "runway inspired", "editorial inspired", "street luxe"];
 
-const SHOE_BUNDLE_KEYWORDS = [
-  "shoes",
-  "shoe bundle",
-  "sneakers",
-  "heels",
-  "boots",
-  "sandals",
-  "loafers",
-  "mules",
-];
+const SHOE_BUNDLE_KEYWORDS = ["shoes", "shoe bundle", "sneakers", "heels", "boots", "sandals"];
 
 const memoryAssetTypeCache = new Map();
 let consecutive429 = 0;
@@ -684,20 +668,37 @@ function buildPlan(runSeed) {
 
   const accessoryPlan = [];
   for (const typeId of ACCESSORY_TYPES) {
-    const base = ACCESSORY_KEYWORDS[typeId] || [];
-    const combined = [...base, ...ACCESSORY_SHARED_DISCOVERY_TERMS];
-    const slice = rotatedSlice(combined, MAX_ACCESSORY_TERMS_PER_TYPE, `${runSeed}:acc:${typeId}`);
+    const keys = ACCESSORY_KEYWORDS[typeId] || [];
+    const slice = rotatedSlice(keys, MAX_ACCESSORY_TERMS_PER_TYPE, `${runSeed}:acc:${typeId}`);
 
     const passes = [];
     for (const kw of slice) {
       for (const catId of ACCESSORY_DISCOVERY_CATEGORIES) {
+        // category 13 + many terms is noisy/400-prone. keep it for hair + generic only.
+        if (catId === 13 && !["hair", "hairstyle", "wig", "face accessory", "head accessory", "accessory"].includes(kw)) {
+          continue;
+        }
         passes.push({ keyword: kw, categoryId: catId, targetTypeId: typeId });
       }
     }
     accessoryPlan.push({ typeId, passes });
   }
 
-  return { clothingPlan, accessoryPlan };
+  // dedicated shared discovery passes (small budget, not per-type blast)
+  const sharedDiscoveryPasses = [];
+  const sharedSlice = rotatedSlice(
+    ACCESSORY_SHARED_DISCOVERY_TERMS,
+    Math.min(MAX_ACCESSORY_TERMS_PER_TYPE, 6),
+    `${runSeed}:acc:shared`
+  );
+  for (const kw of sharedSlice) {
+    for (const catId of ACCESSORY_DISCOVERY_CATEGORIES) {
+      if (catId === 13 && !["hair", "hairstyle", "wig"].includes(kw)) continue;
+      sharedDiscoveryPasses.push({ keyword: kw, categoryId: catId });
+    }
+  }
+
+  return { clothingPlan, accessoryPlan, sharedDiscoveryPasses };
 }
 
 async function crawlPass(pass, tabKey, mode, pagesLimit) {
@@ -730,13 +731,12 @@ async function crawlPass(pass, tabKey, mode, pagesLimit) {
 
       const classified = classifyByType(
         t,
-        mode === "accessory_type_target" ? "accessories" : "clothing",
+        mode === "clothing" ? "clothing" : "accessories",
         tabKey
       );
 
       item.category = classified.category;
       item.subcategory = classified.subcategory || tabKey;
-
       await upsertItem(item);
       upserts += 1;
     }
@@ -752,6 +752,15 @@ async function crawlPass(pass, tabKey, mode, pagesLimit) {
   console.log(
     `[crawl] mode=${mode} tab=${tabKey} kw="${pass.keyword}" cat=${pass.categoryId} pages=${pages} seen=${seen} upserts=${upserts}`
   );
+}
+
+async function crawlSharedAccessoryDiscovery(sharedPasses) {
+  if (!sharedPasses || sharedPasses.length === 0 || MAX_ACCESSORY_PAGES_PER_PASS <= 0) return;
+
+  for (const pass of sharedPasses) {
+    await crawlPass(pass, "all", "accessory_shared", 1);
+    await sleep(DELAY_MS + jitter(500));
+  }
 }
 
 async function crawlShoeBundles(runSeed) {
@@ -832,7 +841,6 @@ async function crawlShoeBundles(runSeed) {
             const classified = classifyByType(finalType, "clothing", null);
             item.category = classified.category;
             item.subcategory = classified.subcategory;
-
             await upsertItem(item);
 
             let role = null;
@@ -931,7 +939,7 @@ async function main() {
     await ensureSchema();
 
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
-    const { clothingPlan, accessoryPlan } = buildPlan(runSeed);
+    const { clothingPlan, accessoryPlan, sharedDiscoveryPasses } = buildPlan(runSeed);
 
     if (MAX_CLOTHING_PAGES_PER_PASS > 0) {
       for (const tab of clothingPlan) {
@@ -952,6 +960,8 @@ async function main() {
           await sleep(DELAY_MS + jitter(500));
         }
       }
+
+      await crawlSharedAccessoryDiscovery(sharedDiscoveryPasses);
     } else {
       console.log("[crawl] accessory passes skipped (MAX_ACCESSORY_PAGES_PER_PASS=0)");
     }
