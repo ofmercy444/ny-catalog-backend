@@ -142,7 +142,30 @@ const CLOTHING_KEYWORDS = {
 
 const ACCESSORY_KEYWORDS = {
   [HAT_ACCESSORY_TYPE]: ["hat", "beanie", "cap", "crown", "headband", "beret", "helmet", "bucket hat", "hairclip", "tiara"],
-  [HAIR_ACCESSORY_TYPE]: ["hair", "messy hair", "curly hair", "straight hair", "long hair", "short hair", "bangs", "ponytail", "braids", "wolf cut"],
+  [HAIR_ACCESSORY_TYPE]: [
+    "hair",
+    "messy hair",
+    "curly hair",
+    "straight hair",
+    "wavy hair",
+    "coily hair",
+    "long hair",
+    "short hair",
+    "bangs",
+    "ponytail",
+    "pigtails",
+    "braids",
+    "bob hair",
+    "pixie hair",
+    "wolf cut",
+    "mullet hair",
+    "fluffy hair",
+    "emo hair",
+    "goth hair",
+    "grunge hair",
+    "punk hair",
+    "kawaii hair",
+  ],
   [FACE_ACCESSORY_TYPE]: ["face accessory", "mask", "face mask", "goggles", "visor", "sunglasses", "glasses", "anime face accessory", "blush face accessory"],
   [NECK_ACCESSORY_TYPE]: ["necklace", "choker", "scarf", "tie", "bow tie", "pendant", "neck accessory", "collar", "chain necklace"],
   [SHOULDER_ACCESSORY_TYPE]: ["shoulder accessory", "shoulder pet", "shoulder plush", "pauldron", "shoulder armor", "shoulder bag", "shoulder dragon", "shoulder cat"],
@@ -241,6 +264,20 @@ const HAIR_FOCUS_KEYWORDS = [
   "white hair",
   "pink hair",
   "blue hair",
+  "fluffy hair",
+  "emo hair",
+  "goth hair",
+  "grunge hair",
+  "punk hair",
+  "kawaii hair",
+  "curly",
+  "wavy",
+  "straight",
+  "coily",
+  "wolfcut",
+  "pixie",
+  "bob",
+  "messy",
 ];
 
 const memoryAssetTypeCache = new Map();
@@ -323,7 +360,7 @@ function isShoeLikeTitle(name) {
 
 function isHairLikeTitle(name) {
   const n = String(name || "").toLowerCase();
-  return /(^|[^a-z])(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|bun|braids?|twists?|locs?|dreads?|afro|coily|curly|wavy|straight|layers?|bob|pixie|wolf[ -]?cut|mullet)([^a-z]|$)/.test(
+  return /(^|[^a-z])(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|bun|braids?|twists?|locs?|dreads?|afro|coily|curly|wavy|straight|layers?|bob|pixie|wolf[ -]?cut|mullet|emo|goth|grunge|punk|kawaii|fluffy|messy)([^a-z]|$)/.test(
     n
   );
 }
