@@ -91,16 +91,33 @@ const ACCESSORY_SUBTAB_ALIASES = {
   hair: "hair",
 };
 
+const BODY_SUBTAB_ALIASES = {
+  all: "all",
+  hair: "hair",
+  heads: "heads",
+  bodies: "bodies",
+  animations: "animations",
+  bodycolor: "body_color",
+  "body color": "body_color",
+  body_color: "body_color",
+  bodyscale: "body_scale",
+  "body scale": "body_scale",
+  body_scale: "body_scale",
+};
+
 const ACCESSORY_SUBTAB_SET = new Set(Object.values(ACCESSORY_SUBTAB_ALIASES));
 const CLOTHING_SUBTAB_SET = new Set(Object.values(CLOTHING_SUBTAB_ALIASES));
+const BODY_SUBTAB_SET = new Set(Object.values(BODY_SUBTAB_ALIASES));
 
 function normalizeCategory(rawCategory, rawSubtab) {
   const c = String(rawCategory || "").toLowerCase().trim();
   const s = String(rawSubtab || "").toLowerCase().trim();
 
+  if (c === "body") return "body";
   if (c === "accessories" || c === "accessory") return "accessories";
   if (c === "clothing" || c === "clothes" || c === "apparel") return "clothing";
 
+  if (BODY_SUBTAB_SET.has(BODY_SUBTAB_ALIASES[s] || s)) return "body";
   if (ACCESSORY_SUBTAB_SET.has(ACCESSORY_SUBTAB_ALIASES[s] || s)) return "accessories";
   if (CLOTHING_SUBTAB_SET.has(CLOTHING_SUBTAB_ALIASES[s] || s)) return "clothing";
   return "clothing";
@@ -113,14 +130,24 @@ function normalizeTabKey(raw, category) {
     .replace(/\s+/g, " ")
     .replace(/-/g, " ");
   const compact = cleaned.replace(/[&\s_-]/g, "");
-  const source =
-    String(category || "").toLowerCase() === "accessories"
+  const source = String(category || "").toLowerCase() === "body"
+    ? BODY_SUBTAB_ALIASES
+    : String(category || "").toLowerCase() === "accessories"
       ? ACCESSORY_SUBTAB_ALIASES
       : CLOTHING_SUBTAB_ALIASES;
   return source[cleaned] || source[compact] || "all";
 }
 
 function getSubtabSpec(category, subtab) {
+  if (category === "body") {
+    if (subtab === "hair") return { mode: "body_hair" };
+    if (subtab === "heads") return { mode: "typed", allowedTypes: [17, 79] };
+    if (subtab === "bodies") return { mode: "typed", allowedTypes: [27, 28, 29, 30, 31] };
+    if (subtab === "animations") return { mode: "typed", allowedTypes: [48, 49, 50, 51, 52, 53, 54, 55, 56, 61] };
+    if (subtab === "body_color" || subtab === "body_scale") return { mode: "none" };
+    return { mode: "typed", allowedTypes: [17, 79, 27, 28, 29, 30, 31, 48, 49, 50, 51, 52, 53, 54, 55, 56, 61] };
+  }
+
   if (category === "accessories") {
     if (subtab === "head") return { mode: "typed", allowedTypes: [HAT_ACCESSORY_TYPE] };
     if (subtab === "face") return { mode: "typed", allowedTypes: [FACE_ACCESSORY_TYPE] };
@@ -356,7 +383,44 @@ app.get("/catalog/search", async (req, reply) => {
     let rows = [];
     let nextOffset = null;
 
-    if (category === "clothing" && spec.mode === "shoe_parents") {
+    if (category === "body" && spec.mode === "none") {
+      rows = [];
+      nextOffset = null;
+    } else if (category === "body" && spec.mode === "body_hair") {
+      const params = [];
+      let where = `
+        WHERE (
+          i.asset_type_id = ${HAIR_ACCESSORY_TYPE}
+          OR (
+            lower(coalesce(i.name,'')) ~ '(^|[^a-z0-9])(hair|hairstyle|wig|ponytail|pigtails?|braids?|bob|pixie|wolf[ -]?cut|mullet|bangs?|fringe|curly|wavy|straight)([^a-z0-9]|$)'
+            AND lower(coalesce(i.name,'')) !~ '(^|[^a-z0-9])(helmet|halo|horns|mask|crown|headphones|wing|tail|necklace|glasses)([^a-z0-9]|$)'
+          )
+        )
+      `;
+
+      if (q.length > 0) {
+        params.push(`%${q}%`);
+        where += ` AND lower(coalesce(i.name,'')) LIKE $${params.length}`;
+      }
+      params.push(limit);
+      const limitIdx = params.length;
+      params.push(offset);
+      const offsetIdx = params.length;
+
+      const sql = `
+        SELECT ${assetSelect()}
+        FROM public.catalog_items i
+        ${where}
+        ORDER BY
+          CASE WHEN i.asset_type_id = ${HAIR_ACCESSORY_TYPE} THEN 0 ELSE 1 END,
+          i.updated_at DESC,
+          i.asset_id DESC
+        LIMIT $${limitIdx}
+        OFFSET $${offsetIdx};
+      `;
+      ({ rows } = await pool.query(sql, params));
+      nextOffset = rows.length === limit ? offset + limit : null;
+    } else if (category === "clothing" && spec.mode === "shoe_parents") {
       const params = [];
       let where =
         "WHERE lower(coalesce(b.category, 'clothing')) = 'clothing' AND lower(coalesce(b.subcategory, '')) = 'shoes'";
