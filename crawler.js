@@ -48,6 +48,8 @@ const MAX_ACCESSORY_SUBCATEGORY_PAGES_PER_PASS = Number(
 );
 
 const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 0);
+const ANIMATION_BUNDLE_PAGES = Number(process.env.CRAWL_ANIMATION_BUNDLE_PAGES || 2);
+const MAX_ANIMATION_BUNDLE_TERMS = Number(process.env.CRAWL_MAX_ANIMATION_BUNDLE_TERMS || 6);
 
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 9000);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 1400);
@@ -70,6 +72,16 @@ const MAX_BODY_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_BODY_TERMS_PER_TAB |
 const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 4);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 2);
+const ANIMATION_BUNDLE_TERMS = [
+  "animation pack",
+  "idle animation pack",
+  "walk animation pack",
+  "run animation pack",
+  "emote pack",
+  "zombie animation pack",
+  "ninja animation pack",
+  "stylish animation pack",
+];
 const ACCESSORY_SUBCATEGORY_SWEEP_IDS = String(
   process.env.CRAWL_ACCESSORY_SUBCATEGORY_SWEEP_IDS || "20"
 )
@@ -343,6 +355,58 @@ async function fetchAssetDetails(assetId) {
   return fetchJsonWithRetry(url, DETAIL_RETRIES, `asset-detail:${assetId}`);
 }
 
+function buildBundleSearchUrl({ keyword, cursor }) {
+  const p = new URLSearchParams();
+  p.set("Limit", String(PAGE_LIMIT));
+  p.set("SortType", "3");
+  if (keyword) p.set("Keyword", String(keyword));
+  if (cursor) p.set("Cursor", String(cursor));
+  return `https://catalog.roblox.com/v1/search/bundles/details?${p.toString()}`;
+}
+
+async function upsertCatalogBundle(record) {
+  if (!record?.bundle_id) return false;
+  await pool.query(
+    `
+    INSERT INTO public.catalog_bundles (
+      bundle_id, name, description,
+      creator_name, creator_id, creator_type,
+      bundle_type, thumbnail_url,
+      category, subcategory, is_offsale, price_robux, updated_at
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+    ON CONFLICT (bundle_id) DO UPDATE SET
+      name = EXCLUDED.name,
+      description = EXCLUDED.description,
+      creator_name = EXCLUDED.creator_name,
+      creator_id = EXCLUDED.creator_id,
+      creator_type = EXCLUDED.creator_type,
+      bundle_type = EXCLUDED.bundle_type,
+      thumbnail_url = EXCLUDED.thumbnail_url,
+      category = EXCLUDED.category,
+      subcategory = EXCLUDED.subcategory,
+      is_offsale = EXCLUDED.is_offsale,
+      price_robux = EXCLUDED.price_robux,
+      updated_at = NOW()
+    `,
+    [
+      record.bundle_id,
+      record.name,
+      record.description,
+      record.creator_name,
+      record.creator_id,
+      record.creator_type,
+      record.bundle_type,
+      record.thumbnail_url,
+      record.category,
+      record.subcategory,
+      record.is_offsale,
+      record.price_robux,
+    ]
+  );
+  return true;
+}
+
 async function ensureSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.catalog_items (
@@ -396,11 +460,22 @@ async function ensureSchema() {
       description TEXT,
       creator_name TEXT,
       creator_id BIGINT,
+      creator_type TEXT,
+      bundle_type TEXT,
       thumbnail_url TEXT,
       category TEXT,
       subcategory TEXT,
+      is_offsale BOOLEAN DEFAULT FALSE,
+      price_robux INTEGER,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+  await pool.query(`
+    ALTER TABLE public.catalog_bundles
+      ADD COLUMN IF NOT EXISTS creator_type TEXT,
+      ADD COLUMN IF NOT EXISTS bundle_type TEXT,
+      ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS price_robux INTEGER;
   `);
 
   await pool.query(`
@@ -762,6 +837,71 @@ async function crawlShoeBundles() {
   console.log("[crawl-bundles] placeholder lane enabled; no-op for now");
 }
 
+async function crawlAnimationBundles(runSeed) {
+  if (ANIMATION_BUNDLE_PAGES <= 0) {
+    console.log("[crawl-animation-bundles] skipped (CRAWL_ANIMATION_BUNDLE_PAGES=0)");
+    return;
+  }
+
+  const terms = limitedRotatedTerms(
+    ANIMATION_BUNDLE_TERMS,
+    MAX_ANIMATION_BUNDLE_TERMS,
+    runSeed,
+    "animation-bundles"
+  );
+
+  for (const kw of terms) {
+    let cursor = null;
+    let pages = 0;
+    let totalSeen = 0;
+    let totalUpserts = 0;
+
+    while (pages < ANIMATION_BUNDLE_PAGES) {
+      const url = buildBundleSearchUrl({ keyword: kw, cursor });
+      const data = await fetchJsonWithRetry(url, SEARCH_RETRIES, `anim-bundle:${kw}`);
+      if (!data || !Array.isArray(data.data)) break;
+
+      let seen = 0;
+      let upserts = 0;
+      for (const b of data.data) {
+        seen += 1;
+        const creator = b?.creator || {};
+        const record = {
+          bundle_id: asNumber(b?.id),
+          name: String(b?.name || ""),
+          description: String(b?.description || ""),
+          creator_name: String(creator?.name || b?.creatorName || ""),
+          creator_id: asNumber(creator?.id || b?.creatorId),
+          creator_type: String(creator?.type || b?.creatorType || ""),
+          bundle_type: String(b?.bundleType || ""),
+          thumbnail_url: "",
+          category: "body",
+          subcategory: "animations",
+          is_offsale: false,
+          price_robux: asNumber(b?.price || b?.product?.priceInRobux),
+        };
+        if (record.bundle_id && (await upsertCatalogBundle(record))) upserts += 1;
+      }
+
+      pages += 1;
+      totalSeen += seen;
+      totalUpserts += upserts;
+      console.log(
+        `[crawl-animation-bundles] kw="${kw}" pages=${pages} seen=${seen} upserts=${upserts}`
+      );
+
+      cursor = data.nextPageCursor || null;
+      if (!cursor) break;
+      await sleep(DELAY_MS + jitter(500));
+    }
+
+    console.log(
+      `[crawl-animation-bundles] kw="${kw}" totalSeen=${totalSeen} totalUpserts=${totalUpserts}`
+    );
+    await sleep(DELAY_MS + jitter(500));
+  }
+}
+
 async function pruneInvalidShoeBundles() {
   // no-op
 }
@@ -780,6 +920,8 @@ async function main() {
         process.env.CRAWL_ACCESSORY_SUBCATEGORY_SWEEP_IDS,
       CRAWL_MATRIX_PAGES_PER_PAIR_raw: process.env.CRAWL_MATRIX_PAGES_PER_PAIR,
       CRAWL_SHOE_BUNDLE_PAGES_raw: process.env.CRAWL_SHOE_BUNDLE_PAGES,
+      CRAWL_ANIMATION_BUNDLE_PAGES_raw: process.env.CRAWL_ANIMATION_BUNDLE_PAGES,
+      CRAWL_MAX_ANIMATION_BUNDLE_TERMS_raw: process.env.CRAWL_MAX_ANIMATION_BUNDLE_TERMS,
       CRAWL_DELAY_MS_raw: process.env.CRAWL_DELAY_MS,
       CRAWL_ASSET_META_DELAY_MS_raw: process.env.CRAWL_ASSET_META_DELAY_MS,
     });
@@ -845,6 +987,7 @@ async function main() {
     }
 
     await crawlShoeBundles();
+    await crawlAnimationBundles(runSeed);
     await pruneInvalidShoeBundles();
 
     console.log("Crawl complete");

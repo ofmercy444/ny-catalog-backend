@@ -143,7 +143,7 @@ function getSubtabSpec(category, subtab) {
     if (subtab === "hair") return { mode: "body_hair" };
     if (subtab === "heads") return { mode: "typed", allowedTypes: [17, 79] };
     if (subtab === "bodies") return { mode: "typed", allowedTypes: [27, 28, 29, 30, 31] };
-    if (subtab === "animations") return { mode: "typed", allowedTypes: [48, 49, 50, 51, 52, 53, 54, 55, 56, 61] };
+    if (subtab === "animations") return { mode: "body_animation_bundles" };
     if (subtab === "body_color" || subtab === "body_scale") return { mode: "none" };
     return { mode: "typed", allowedTypes: [17, 79, 27, 28, 29, 30, 31, 48, 49, 50, 51, 52, 53, 54, 55, 56, 61] };
   }
@@ -386,6 +386,31 @@ app.get("/catalog/search", async (req, reply) => {
     if (category === "body" && spec.mode === "none") {
       rows = [];
       nextOffset = null;
+    } else if (category === "body" && spec.mode === "body_animation_bundles") {
+      const params = [];
+      let where = `
+        WHERE lower(coalesce(b.category, 'body')) = 'body'
+          AND lower(coalesce(b.subcategory, '')) = 'animations'
+      `;
+      if (q.length > 0) {
+        params.push(`%${q}%`);
+        where += ` AND lower(coalesce(b.name,'')) LIKE $${params.length}`;
+      }
+      params.push(limit);
+      const limitIdx = params.length;
+      params.push(offset);
+      const offsetIdx = params.length;
+
+      const sql = `
+        SELECT ${bundleSelect()}
+        FROM public.catalog_bundles b
+        ${where}
+        ORDER BY b.updated_at DESC, b.bundle_id DESC
+        LIMIT $${limitIdx}
+        OFFSET $${offsetIdx};
+      `;
+      ({ rows } = await pool.query(sql, params));
+      nextOffset = rows.length === limit ? offset + limit : null;
     } else if (category === "body" && spec.mode === "body_hair") {
       const params = [];
       let where = `
