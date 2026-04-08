@@ -676,10 +676,22 @@ async function crawlSearchLane({
   let totalUpserts = 0;
   let totalForcedMetaLookups = 0;
   const budget = { count: 0, max: Math.max(0, maxMetaLookups) };
+  let laneSubcategory = subcategory;
 
   while (pages < maxPages) {
-    const url = buildSearchUrl({ category, subcategory, keyword, cursor });
-    const data = await fetchJsonWithRetry(url, SEARCH_RETRIES, laneLabel);
+    const url = buildSearchUrl({ category, subcategory: laneSubcategory, keyword, cursor });
+    let data = await fetchJsonWithRetry(url, SEARCH_RETRIES, laneLabel);
+    if (!data && cursor === null && laneSubcategory === "HairAccessory") {
+      console.log(
+        `[crawl] ${laneLabel} fallback: retrying without HairAccessory subcategory filter`
+      );
+      laneSubcategory = null;
+      data = await fetchJsonWithRetry(
+        buildSearchUrl({ category, subcategory: laneSubcategory, keyword, cursor }),
+        SEARCH_RETRIES,
+        `${laneLabel}:fallback`
+      );
+    }
     if (!data || !Array.isArray(data.data)) break;
 
     const filteredItems =
@@ -818,7 +830,7 @@ function buildPlans(runSeed) {
         accessoryPlan.push({
           laneLabel: `accessories:type${typeId}:${kw}`,
           category: ACCESSORIES_CATEGORY,
-          subcategory: null,
+          subcategory: typeId === 41 ? "HairAccessory" : null,
           keyword: kw,
           requiredAssetTypeId: typeId,
         });
