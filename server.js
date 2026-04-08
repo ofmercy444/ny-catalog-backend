@@ -47,7 +47,7 @@ const ACCESSORY_UI_TYPES = [
 ];
 
 const HAIR_TITLE_REGEX =
-  "((^|[^a-z])(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|bun|braids?|twists?|locs?|dreads?|afro|coily|curly|wavy|straight|layers?|bob|pixie|wolf[ -]?cut|mullet|emo|goth|grunge|punk|kawaii|fluffy|messy)([^a-z]|$))";
+  "((^|[^a-z])(hair|hairstyle|long|short|medium|mid[ -]?length|layered|straight|wavy|curly|coily|textured|messy|fluffy|bob|pixie|wolf[ -]?cut|mullet|bangs?|fringe|ponytail|pigtails?|braids?|twists?|locs?|dreads?|bun|updo|afro|blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange|ombre|highlight)([^a-z]|$))";
 
 const CLOTHING_SUBTAB_ALIASES = {
   all: "all",
