@@ -473,7 +473,8 @@ function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
 }
 
 async function fetchJsonWithRetry(url, tries, label) {
-  for (let attempt = 1; attempt <= tries; attempt += 1) {
+  const maxAttempts = Math.max(1, Number(tries) || 0);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const res = await fetch(url, {
         headers: {
@@ -490,7 +491,7 @@ async function fetchJsonWithRetry(url, tries, label) {
       if (res.status === 429) {
         consecutive429 += 1;
         const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt * attempt) + jitter(700);
-        console.log(`[429] ${label} retry ${attempt}/${tries} in ${waitMs}ms -> ${url}`);
+        console.log(`[429] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms -> ${url}`);
         await sleep(waitMs);
 
         if (consecutive429 >= RATE_LIMIT_STREAK_TRIGGER) {
@@ -507,9 +508,9 @@ async function fetchJsonWithRetry(url, tries, label) {
         return null;
       }
 
-      if (res.status >= 500 && attempt < tries) {
+      if (res.status >= 500 && attempt < maxAttempts) {
         const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(600);
-        console.log(`[${res.status}] ${label} retry ${attempt}/${tries} in ${waitMs}ms`);
+        console.log(`[${res.status}] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms`);
         await sleep(waitMs);
         continue;
       }
@@ -518,12 +519,12 @@ async function fetchJsonWithRetry(url, tries, label) {
       console.log(`[${res.status}] ${label} give up -> ${url} ${text.slice(0, 160)}`);
       return null;
     } catch (err) {
-      if (attempt >= tries) {
+      if (attempt >= maxAttempts) {
         console.log(`[error] ${label} give up -> ${url} :: ${err.message}`);
         return null;
       }
       const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(600);
-      console.log(`[error] ${label} retry ${attempt}/${tries} in ${waitMs}ms -> ${err.message}`);
+      console.log(`[error] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms -> ${err.message}`);
       await sleep(waitMs);
     }
   }
@@ -1027,7 +1028,6 @@ async function crawlHairFocused(runSeed) {
           }
 
           if (t !== HAIR_ACCESSORY_TYPE) continue;
-          if (!isHairLikeTitle(item.name)) continue;
 
           const classified = classifyByType(t, "accessories", "hair");
           item.category = classified.category;
@@ -1085,7 +1085,6 @@ async function crawlHairDirectSubcategory() {
         .replace(/[^a-z]/g, "");
       const hasHairTypeName = normalizedTypeName === "hairaccessory" || normalizedTypeName === "hair";
       if (!hasExplicitHairType && !hasHairTypeName) continue;
-      if (!isHairLikeTitle(item.name)) continue;
       item.asset_type_id = HAIR_ACCESSORY_TYPE;
       item.asset_type_name = "HairAccessory";
       item.category = "accessories";
