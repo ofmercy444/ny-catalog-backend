@@ -228,6 +228,7 @@ function asNumber(v) {
 }
 
 function parseAssetTypeId(item = {}) {
+  if (!item || typeof item !== "object") return null;
   const fromAssetType = asNumber(item.assetType);
   if (fromAssetType !== null) return fromAssetType;
   const fromAssetTypeId = asNumber(item.assetTypeId);
