@@ -43,6 +43,9 @@ const MAX_ACCESSORY_PAGES_PER_PASS = Number(
     process.env.CRAWL_PAGES_PER_SUBTAB ??
     0
 );
+const MAX_ACCESSORY_SUBCATEGORY_PAGES_PER_PASS = Number(
+  process.env.CRAWL_PAGES_PER_ACCESSORY_SUBCATEGORY_PASS || 1
+);
 
 const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 0);
 
@@ -67,6 +70,12 @@ const MAX_BODY_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_BODY_TERMS_PER_TAB |
 const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 4);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 2);
+const ACCESSORY_SUBCATEGORY_SWEEP_IDS = String(
+  process.env.CRAWL_ACCESSORY_SUBCATEGORY_SWEEP_IDS || "20"
+)
+  .split(",")
+  .map((s) => Number(String(s).trim()))
+  .filter((n) => Number.isFinite(n) && n > 0);
 
 const TYPE_TO_GROUP = {
   // Classic clothing
@@ -622,6 +631,29 @@ async function crawlCategorySubcategoryMatrix() {
   }
 }
 
+async function crawlAccessorySubcategorySweep() {
+  if (MAX_ACCESSORY_SUBCATEGORY_PAGES_PER_PASS <= 0) {
+    console.log("[crawl-acc-sub] skipped (CRAWL_PAGES_PER_ACCESSORY_SUBCATEGORY_PASS=0)");
+    return;
+  }
+  if (ACCESSORY_SUBCATEGORY_SWEEP_IDS.length === 0) {
+    console.log("[crawl-acc-sub] skipped (no subcategory IDs configured)");
+    return;
+  }
+
+  for (const subcategory of ACCESSORY_SUBCATEGORY_SWEEP_IDS) {
+    await crawlSearchLane({
+      laneLabel: `acc-sub:cat11:sub${subcategory}`,
+      category: ACCESSORIES_CATEGORY,
+      subcategory,
+      keyword: null,
+      maxPages: MAX_ACCESSORY_SUBCATEGORY_PAGES_PER_PASS,
+      maxMetaLookups: MAX_MATRIX_META_LOOKUPS_PER_PAIR,
+    });
+    await sleep(DELAY_MS + jitter(500));
+  }
+}
+
 function buildPlans(runSeed) {
   const clothingPlan = [];
   if (MAX_CLOTHING_PAGES_PER_PASS > 0) {
@@ -710,6 +742,10 @@ async function main() {
       CRAWL_PAGES_PER_CLOTHING_PASS_raw: process.env.CRAWL_PAGES_PER_CLOTHING_PASS,
       CRAWL_PAGES_PER_BODY_PASS_raw: process.env.CRAWL_PAGES_PER_BODY_PASS,
       CRAWL_PAGES_PER_ACCESSORY_PASS_raw: process.env.CRAWL_PAGES_PER_ACCESSORY_PASS,
+      CRAWL_PAGES_PER_ACCESSORY_SUBCATEGORY_PASS_raw:
+        process.env.CRAWL_PAGES_PER_ACCESSORY_SUBCATEGORY_PASS,
+      CRAWL_ACCESSORY_SUBCATEGORY_SWEEP_IDS_raw:
+        process.env.CRAWL_ACCESSORY_SUBCATEGORY_SWEEP_IDS,
       CRAWL_MATRIX_PAGES_PER_PAIR_raw: process.env.CRAWL_MATRIX_PAGES_PER_PAIR,
       CRAWL_SHOE_BUNDLE_PAGES_raw: process.env.CRAWL_SHOE_BUNDLE_PAGES,
       CRAWL_DELAY_MS_raw: process.env.CRAWL_DELAY_MS,
@@ -723,6 +759,7 @@ async function main() {
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
 
     await crawlCategorySubcategoryMatrix();
+    await crawlAccessorySubcategorySweep();
 
     const { clothingPlan, bodyPlan, accessoryPlan } = buildPlans(runSeed);
 
