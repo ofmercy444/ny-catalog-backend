@@ -389,7 +389,7 @@ function isShoeLikeTitle(name) {
 
 function isHairLikeTitle(name) {
   const n = String(name || "").toLowerCase();
-  return /(^|[^a-z])(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|braids?|twists?|locs?|dreads?|bob|pixie|wolf[ -]?cut|mullet|afro|updo|bun)([^a-z]|$)|(^|[^a-z])(blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange)\s+hair([^a-z]|$)/.test(
+  return /(^|[^a-z])(hair|hairstyle|hairdo|wig|bangs?|fringe|ponytail|pigtails?|braids?|twists?|locs?|dreads?|afro|updo)([^a-z]|$)|(^|[^a-z])(bob|pixie)\s*(cut|hair)?([^a-z]|$)|(^|[^a-z])(wolf[ -]?cut|mullet)([^a-z]|$)|(^|[^a-z])(long|short|medium|mid[ -]?length|straight|wavy|curly|coily|textured|layered|ombre|highlighted|blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange)\s+hair([^a-z]|$)/.test(
     n
   );
 }
@@ -1031,8 +1031,7 @@ async function crawlHairDirectSubcategory() {
         .toLowerCase()
         .replace(/[^a-z]/g, "");
       const hasHairTypeName = normalizedTypeName === "hairaccessory" || normalizedTypeName === "hair";
-      const looksHairLike = isHairLikeTitle(item.name);
-      if (!hasExplicitHairType && !hasHairTypeName && !looksHairLike) continue;
+      if (!hasExplicitHairType && !hasHairTypeName) continue;
       item.asset_type_id = HAIR_ACCESSORY_TYPE;
       item.asset_type_name = "HairAccessory";
       item.category = "accessories";

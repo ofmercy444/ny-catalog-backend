@@ -47,7 +47,7 @@ const ACCESSORY_UI_TYPES = [
 ];
 
 const HAIR_TITLE_REGEX =
-  "((^|[^a-z])(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|braids?|twists?|locs?|dreads?|bob|pixie|wolf[ -]?cut|mullet|afro|updo|bun)([^a-z]|$)|(^|[^a-z])(blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange)\\s+hair([^a-z]|$))";
+  "((^|[^a-z])(hair|hairstyle|hairdo|wig|bangs?|fringe|ponytail|pigtails?|braids?|twists?|locs?|dreads?|afro|updo)([^a-z]|$)|(^|[^a-z])(bob|pixie)\\s*(cut|hair)?([^a-z]|$)|(^|[^a-z])(wolf[ -]?cut|mullet)([^a-z]|$)|(^|[^a-z])(long|short|medium|mid[ -]?length|straight|wavy|curly|coily|textured|layered|ombre|highlighted|blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange)\\s+hair([^a-z]|$))";
 
 const CLOTHING_SUBTAB_ALIASES = {
   all: "all",
@@ -347,7 +347,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v15:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v16:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
