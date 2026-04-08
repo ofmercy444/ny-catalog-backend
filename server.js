@@ -59,7 +59,6 @@ const CLOTHING_SUBTAB_ALIASES = {
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
-
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -91,33 +90,16 @@ const ACCESSORY_SUBTAB_ALIASES = {
   hair: "hair",
 };
 
-const BODY_SUBTAB_ALIASES = {
-  all: "all",
-  hair: "hair",
-  heads: "heads",
-  bodies: "bodies",
-  animations: "animations",
-  bodycolor: "body_color",
-  "body color": "body_color",
-  body_color: "body_color",
-  bodyscale: "body_scale",
-  "body scale": "body_scale",
-  body_scale: "body_scale",
-};
-
 const ACCESSORY_SUBTAB_SET = new Set(Object.values(ACCESSORY_SUBTAB_ALIASES));
 const CLOTHING_SUBTAB_SET = new Set(Object.values(CLOTHING_SUBTAB_ALIASES));
-const BODY_SUBTAB_SET = new Set(Object.values(BODY_SUBTAB_ALIASES));
 
 function normalizeCategory(rawCategory, rawSubtab) {
   const c = String(rawCategory || "").toLowerCase().trim();
   const s = String(rawSubtab || "").toLowerCase().trim();
 
-  if (c === "body") return "body";
   if (c === "accessories" || c === "accessory") return "accessories";
   if (c === "clothing" || c === "clothes" || c === "apparel") return "clothing";
 
-  if (BODY_SUBTAB_SET.has(BODY_SUBTAB_ALIASES[s] || s)) return "body";
   if (ACCESSORY_SUBTAB_SET.has(ACCESSORY_SUBTAB_ALIASES[s] || s)) return "accessories";
   if (CLOTHING_SUBTAB_SET.has(CLOTHING_SUBTAB_ALIASES[s] || s)) return "clothing";
   return "clothing";
@@ -130,24 +112,14 @@ function normalizeTabKey(raw, category) {
     .replace(/\s+/g, " ")
     .replace(/-/g, " ");
   const compact = cleaned.replace(/[&\s_-]/g, "");
-  const source = String(category || "").toLowerCase() === "body"
-    ? BODY_SUBTAB_ALIASES
-    : String(category || "").toLowerCase() === "accessories"
+  const source =
+    String(category || "").toLowerCase() === "accessories"
       ? ACCESSORY_SUBTAB_ALIASES
       : CLOTHING_SUBTAB_ALIASES;
   return source[cleaned] || source[compact] || "all";
 }
 
 function getSubtabSpec(category, subtab) {
-  if (category === "body") {
-    if (subtab === "hair") return { mode: "body_hair" };
-    if (subtab === "heads") return { mode: "typed", allowedTypes: [17, 79] };
-    if (subtab === "bodies") return { mode: "typed", allowedTypes: [27, 28, 29, 30, 31] };
-    if (subtab === "animations") return { mode: "typed", allowedTypes: [48, 49, 50, 51, 52, 53, 54, 55, 56, 61] };
-    if (subtab === "body_color" || subtab === "body_scale") return { mode: "none" };
-    return { mode: "typed", allowedTypes: [17, 79, 27, 28, 29, 30, 31, 48, 49, 50, 51, 52, 53, 54, 55, 56, 61] };
-  }
-
   if (category === "accessories") {
     if (subtab === "head") return { mode: "typed", allowedTypes: [HAT_ACCESSORY_TYPE] };
     if (subtab === "face") return { mode: "typed", allowedTypes: [FACE_ACCESSORY_TYPE] };
@@ -267,13 +239,15 @@ async function ensureSchema() {
     );
   `);
 
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_id INTEGER;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS asset_type_name TEXT;`);
-  await pool.query(`ALTER TABLE public.catalog_items ADD COLUMN IF NOT EXISTS subcategory TEXT;`);
-  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS subcategory TEXT DEFAULT 'misc';`);
-  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'bundle';`);
-  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE public.catalog_bundles ADD COLUMN IF NOT EXISTS price_robux INTEGER;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.bundle_asset_links (
+      bundle_id BIGINT NOT NULL,
+      asset_id BIGINT NOT NULL,
+      role TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (bundle_id, asset_id)
+    );
+  `);
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_category ON public.catalog_items(category);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_catalog_items_subcategory ON public.catalog_items(subcategory);`);
@@ -299,21 +273,21 @@ function assetSelect() {
   return `
     i.asset_id,
     i.name,
-    i.category,
-    coalesce(i.subcategory, '') AS subcategory,
-    i.item_type,
+    lower(coalesce(i.category, 'clothing')) AS category,
+    lower(coalesce(i.subcategory, '')) AS subcategory,
+    coalesce(i.item_type, 'asset') AS item_type,
     i.asset_type_id,
-    i.asset_type_name,
+    coalesce(i.asset_type_name, '') AS asset_type_name,
     i.creator_id,
-    i.creator_name,
-    i.creator_type,
-    i.description,
+    coalesce(i.creator_name, '') AS creator_name,
+    coalesce(i.creator_type, '') AS creator_type,
+    coalesce(i.description, '') AS description,
     'rbxthumb://type=Asset&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_url,
     'rbxthumb://type=BundleThumbnail&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_bundle_url,
     coalesce(i.thumbnail_url, '') AS thumbnail_raw_url,
-    i.is_offsale,
-    i.is_limited,
-    i.is_limited_unique,
+    coalesce(i.is_offsale, false) AS is_offsale,
+    coalesce(i.is_limited, false) AS is_limited,
+    coalesce(i.is_limited_unique, false) AS is_limited_unique,
     i.price_robux,
     i.updated_at,
     CASE WHEN i.asset_type_id = ANY(ARRAY[${LAYERED_TYPES.join(",")} ]::int[]) THEN true ELSE false END AS is_layered,
@@ -339,8 +313,8 @@ function bundleSelect() {
     NULL::int AS asset_type_id,
     ''::text AS asset_type_name,
     b.creator_id,
-    b.creator_name,
-    b.creator_type,
+    coalesce(b.creator_name, '') AS creator_name,
+    coalesce(b.creator_type, '') AS creator_type,
     coalesce(b.description, '') AS description,
     'rbxthumb://type=BundleThumbnail&id=' || b.bundle_id::text || '&w=420&h=420' AS thumbnail_url,
     'rbxthumb://type=BundleThumbnail&id=' || b.bundle_id::text || '&w=420&h=420' AS thumbnail_bundle_url,
@@ -373,7 +347,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v22:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v30:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -383,62 +357,7 @@ app.get("/catalog/search", async (req, reply) => {
     let rows = [];
     let nextOffset = null;
 
-    if (category === "body" && spec.mode === "none") {
-      rows = [];
-      nextOffset = null;
-    } else if (category === "body" && spec.mode === "body_animation_bundles") {
-      const params = [];
-      let where = `
-        WHERE lower(coalesce(b.category, 'body')) = 'body'
-          AND lower(coalesce(b.subcategory, '')) = 'animations'
-      `;
-      if (q.length > 0) {
-        params.push(`%${q}%`);
-        where += ` AND lower(coalesce(b.name,'')) LIKE $${params.length}`;
-      }
-      params.push(limit);
-      const limitIdx = params.length;
-      params.push(offset);
-      const offsetIdx = params.length;
-
-      const sql = `
-        SELECT ${bundleSelect()}
-        FROM public.catalog_bundles b
-        ${where}
-        ORDER BY b.updated_at DESC, b.bundle_id DESC
-        LIMIT $${limitIdx}
-        OFFSET $${offsetIdx};
-      `;
-      ({ rows } = await pool.query(sql, params));
-      nextOffset = rows.length === limit ? offset + limit : null;
-    } else if (category === "body" && spec.mode === "body_hair") {
-      const params = [];
-      let where = `
-        WHERE lower(regexp_replace(coalesce(i.asset_type_name, ''), '[^a-z0-9]+', '', 'g')) = 'hairaccessory'
-      `;
-
-      if (q.length > 0) {
-        params.push(`%${q}%`);
-        where += ` AND lower(coalesce(i.name,'')) LIKE $${params.length}`;
-      }
-      params.push(limit);
-      const limitIdx = params.length;
-      params.push(offset);
-      const offsetIdx = params.length;
-
-      const sql = `
-        SELECT ${assetSelect()}
-        FROM public.catalog_items i
-        ${where}
-        ORDER BY
-          i.updated_at DESC,
-          i.asset_id DESC
-        LIMIT $${limitIdx}
-        OFFSET $${offsetIdx};
-      `;
-      ({ rows } = await pool.query(sql, params));
-      nextOffset = rows.length === limit ? offset + limit : null;
-    } else if (category === "clothing" && spec.mode === "shoe_parents") {
+    if (category === "clothing" && spec.mode === "shoe_parents") {
       const params = [];
       let where =
         "WHERE lower(coalesce(b.category, 'clothing')) = 'clothing' AND lower(coalesce(b.subcategory, '')) = 'shoes'";
@@ -446,18 +365,14 @@ app.get("/catalog/search", async (req, reply) => {
         params.push(`%${q}%`);
         where += ` AND lower(coalesce(b.name,'')) LIKE $${params.length}`;
       }
-      params.push(limit);
-      const limitIdx = params.length;
-      params.push(offset);
-      const offsetIdx = params.length;
-
+      params.push(limit, offset);
       const sql = `
         SELECT ${bundleSelect()}
         FROM public.catalog_bundles b
         ${where}
         ORDER BY b.updated_at DESC, b.bundle_id DESC
-        LIMIT $${limitIdx}
-        OFFSET $${offsetIdx};
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length};
       `;
       ({ rows } = await pool.query(sql, params));
       nextOffset = rows.length === limit ? offset + limit : null;
@@ -475,10 +390,7 @@ app.get("/catalog/search", async (req, reply) => {
       const layeredIdx = params.length;
       params.push(CLASSIC_TYPES);
       const classicIdx = params.length;
-      params.push(limit);
-      const limitIdx = params.length;
-      params.push(offset);
-      const offsetIdx = params.length;
+      params.push(limit, offset);
 
       const sql = `
         WITH layered_assets AS (
@@ -510,8 +422,8 @@ app.get("/catalog/search", async (req, reply) => {
           SELECT * FROM classic_assets
         ) ranked
         ORDER BY rank_bucket ASC, updated_at DESC, asset_id DESC
-        LIMIT $${limitIdx}
-        OFFSET $${offsetIdx};
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length};
       `;
       ({ rows } = await pool.query(sql, params));
       nextOffset = rows.length === limit ? offset + limit : null;
@@ -536,7 +448,6 @@ app.get("/catalog/search", async (req, reply) => {
         if (spec.fallbackClassicTypes.length > 0) {
           const fallbackTypesIdx = params.length + 1;
           params.push(spec.fallbackClassicTypes);
-
           const fallbackRegexIdx = params.length + 1;
           params.push(spec.fallbackTitleRegex);
 
@@ -554,10 +465,7 @@ app.get("/catalog/search", async (req, reply) => {
         }
 
         orderSql = `
-          CASE
-            WHEN i.asset_type_id = ANY($${layeredIdx}::int[]) THEN 0
-            ELSE 1
-          END,
+          CASE WHEN i.asset_type_id = ANY($${layeredIdx}::int[]) THEN 0 ELSE 1 END,
           i.updated_at DESC,
           i.asset_id DESC
         `;
@@ -576,19 +484,100 @@ app.get("/catalog/search", async (req, reply) => {
       nextOffset = rows.length === limit ? offset + limit : null;
     }
 
-    const response = {
-      items: rows,
-      nextOffset,
-      subtabKey: subtab,
-    };
-
-    if (redis) {
-      await redis.set(cacheKey, JSON.stringify(response), "EX", 120);
-    }
+    const response = { items: rows, nextOffset, subtabKey: subtab };
+    if (redis) await redis.set(cacheKey, JSON.stringify(response), "EX", 120);
     return response;
   } catch (err) {
     req.log.error(err);
     return reply.code(500).send({ error: "catalog_search_failed" });
+  }
+});
+
+app.get("/catalog/item/:id", async (req, reply) => {
+  try {
+    await ensureSchemaOnce();
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return reply.code(400).send({ error: "invalid_id" });
+
+    const kind = String(req.query.kind || "asset").toLowerCase();
+
+    if (kind === "bundle") {
+      const bq = await pool.query(
+        `
+        SELECT ${bundleSelect()}
+        FROM public.catalog_bundles b
+        WHERE b.bundle_id = $1
+        LIMIT 1
+        `,
+        [id]
+      );
+      if (bq.rowCount === 0) return reply.code(404).send({ error: "not_found" });
+      const bundle = bq.rows[0];
+
+      const cq = await pool.query(
+        `
+        SELECT
+          i.asset_id,
+          i.name,
+          i.asset_type_id,
+          i.asset_type_name,
+          i.description,
+          i.creator_name,
+          i.creator_id,
+          i.creator_type,
+          l.role,
+          'rbxthumb://type=Asset&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_url,
+          'rbxthumb://type=BundleThumbnail&id=' || i.asset_id::text || '&w=420&h=420' AS thumbnail_bundle_url,
+          coalesce(i.thumbnail_url, '') AS thumbnail_raw_url
+        FROM public.bundle_asset_links l
+        JOIN public.catalog_items i ON i.asset_id = l.asset_id
+        WHERE l.bundle_id = $1
+        ORDER BY
+          CASE
+            WHEN lower(coalesce(l.role,'')) = 'left_shoe' THEN 0
+            WHEN lower(coalesce(l.role,'')) = 'right_shoe' THEN 1
+            ELSE 2
+          END,
+          i.updated_at DESC,
+          i.asset_id DESC
+        `,
+        [id]
+      );
+
+      return {
+        item: bundle,
+        bundle_items: cq.rows,
+        detail_mode: "bundle_parent",
+        can_wear: true,
+        can_purchase: true,
+        show_accessory_scalers: false,
+      };
+    }
+
+    const aq = await pool.query(
+      `
+      SELECT ${assetSelect()}
+      FROM public.catalog_items i
+      WHERE i.asset_id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+    if (aq.rowCount === 0) return reply.code(404).send({ error: "not_found" });
+    const item = aq.rows[0];
+    const isShoeChild = Number(item.asset_type_id) === SHOE_LEFT_TYPE || Number(item.asset_type_id) === SHOE_RIGHT_TYPE;
+
+    return {
+      item,
+      bundle_items: [],
+      detail_mode: isShoeChild ? "bundle_child" : "regular",
+      can_wear: true,
+      can_purchase: !isShoeChild,
+      show_accessory_scalers: false,
+    };
+  } catch (err) {
+    req.log.error(err);
+    return reply.code(500).send({ error: "catalog_item_failed" });
   }
 });
 

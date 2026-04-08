@@ -9,32 +9,13 @@ const pool = new Pool({
       : { rejectUnauthorized: false },
 });
 
-// Roblox catalog categories used by this crawler endpoint
 const CLOTHING_CATEGORY = 3;
 const ACCESSORIES_CATEGORY = 11;
-const AVATAR_ANIMATIONS_CATEGORY = 12;
-const COMMUNITY_CREATIONS_CATEGORY = 13;
-
-// IMPORTANT: category 4 (BodyParts) is not reliably supported by this endpoint for keyword lanes.
-// We discover body items through supported categories and classify by asset_type_id.
-const BODY_DISCOVERY_CATEGORIES = [ACCESSORIES_CATEGORY, AVATAR_ANIMATIONS_CATEGORY, CLOTHING_CATEGORY];
-
-const CATEGORY_MATRIX = [CLOTHING_CATEGORY, ACCESSORIES_CATEGORY, AVATAR_ANIMATIONS_CATEGORY, COMMUNITY_CREATIONS_CATEGORY];
-const SUBCATEGORY_MATRIX = [
-  1, 3, 4, 9, 10, 12, 13, 14, 15, 19, 20, 21, 22, 23, 24, 25, 26, 27,
-  37, 38, 39, 40, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66,
-];
 
 const PAGE_LIMIT = clampLimit(Number(process.env.CRAWL_PAGE_LIMIT || 30));
-const MATRIX_PAGES_PER_PAIR = Number(process.env.CRAWL_MATRIX_PAGES_PER_PAIR || 0);
 
 const MAX_CLOTHING_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_CLOTHING_PASS ??
-    process.env.CRAWL_PAGES_PER_SUBTAB ??
-    0
-);
-const MAX_BODY_PAGES_PER_PASS = Number(
-  process.env.CRAWL_PAGES_PER_BODY_PASS ??
     process.env.CRAWL_PAGES_PER_SUBTAB ??
     0
 );
@@ -43,70 +24,42 @@ const MAX_ACCESSORY_PAGES_PER_PASS = Number(
     process.env.CRAWL_PAGES_PER_SUBTAB ??
     0
 );
-const MAX_ACCESSORY_SUBCATEGORY_PAGES_PER_PASS = Number(
-  process.env.CRAWL_PAGES_PER_ACCESSORY_SUBCATEGORY_PASS || 1
-);
 
 const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 0);
-const ANIMATION_BUNDLE_PAGES = Number(process.env.CRAWL_ANIMATION_BUNDLE_PAGES || 2);
-const MAX_ANIMATION_BUNDLE_TERMS = Number(process.env.CRAWL_MAX_ANIMATION_BUNDLE_TERMS || 6);
 
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 9000);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 1400);
 const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 1);
-const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 3);
+const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 2);
+const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 2);
 const RETRY_BASE_MS = Number(process.env.CRAWL_RETRY_BASE_MS || 1200);
 const MAX_RETRY_BACKOFF_MS = Number(process.env.CRAWL_MAX_RETRY_BACKOFF_MS || 12000);
-const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 14);
+const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 10);
 const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 240000);
 
 const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 80);
-const MAX_MATRIX_META_LOOKUPS_PER_PAIR = Number(
-  process.env.CRAWL_MAX_MATRIX_META_LOOKUPS_PER_PAIR || 40
-);
 
-const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_PER_TAB || 2);
-const MAX_BODY_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_BODY_TERMS_PER_TAB || 8);
-const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 4);
-
+const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_PER_TAB || 8);
+const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 8);
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 2);
-const ANIMATION_BUNDLE_TERMS = [
-  "animation pack",
-  "idle animation pack",
-  "walk animation pack",
-  "run animation pack",
-  "emote pack",
-  "zombie animation pack",
-  "ninja animation pack",
-  "stylish animation pack",
-];
-const ACCESSORY_SUBCATEGORY_SWEEP_IDS = String(
-  process.env.CRAWL_ACCESSORY_SUBCATEGORY_SWEEP_IDS || "20"
-)
-  .split(",")
-  .map((s) => Number(String(s).trim()))
-  .filter((n) => Number.isFinite(n) && n > 0);
 
+// Clothing-accessory canonical mapping
 const TYPE_TO_GROUP = {
-  // Classic clothing
-  2: { category: "clothing", subcategory: "tops" },
-  11: { category: "clothing", subcategory: "shirts" },
-  12: { category: "clothing", subcategory: "pants" },
+  2: { category: "clothing", subcategory: "classic_t_shirts" },
+  11: { category: "clothing", subcategory: "classic_shirts" },
+  12: { category: "clothing", subcategory: "classic_pants" },
 
-  // Layered clothing / clothing accessories
-  64: { category: "clothing", subcategory: "jackets" },
-  65: { category: "clothing", subcategory: "sweaters" },
-  66: { category: "clothing", subcategory: "shorts" },
-  67: { category: "clothing", subcategory: "left_shoe" },
-  68: { category: "clothing", subcategory: "right_shoe" },
-  69: { category: "clothing", subcategory: "dress_skirt" },
+  64: { category: "clothing", subcategory: "t_shirts" },
+  65: { category: "clothing", subcategory: "shirts" },
+  66: { category: "clothing", subcategory: "pants" },
+  67: { category: "clothing", subcategory: "jackets" },
+  68: { category: "clothing", subcategory: "sweaters" },
+  69: { category: "clothing", subcategory: "shorts" },
   70: { category: "clothing", subcategory: "left_shoe" },
   71: { category: "clothing", subcategory: "right_shoe" },
-  72: { category: "clothing", subcategory: "tops" },
+  72: { category: "clothing", subcategory: "dresses_skirts" },
 
-  // Accessories
   8: { category: "accessories", subcategory: "head" },
   41: { category: "accessories", subcategory: "hair" },
   42: { category: "accessories", subcategory: "face" },
@@ -115,39 +68,21 @@ const TYPE_TO_GROUP = {
   45: { category: "accessories", subcategory: "front" },
   46: { category: "accessories", subcategory: "back" },
   47: { category: "accessories", subcategory: "waist" },
-
-  // Body-related canonical types
-  17: { category: "body", subcategory: "heads" },
-  18: { category: "body", subcategory: "faces" },
-  27: { category: "body", subcategory: "bodies" },
-  28: { category: "body", subcategory: "bodies" },
-  29: { category: "body", subcategory: "bodies" },
-  30: { category: "body", subcategory: "bodies" },
-  31: { category: "body", subcategory: "bodies" },
-  48: { category: "body", subcategory: "animations" },
-  49: { category: "body", subcategory: "animations" },
-  50: { category: "body", subcategory: "animations" },
-  51: { category: "body", subcategory: "animations" },
-  52: { category: "body", subcategory: "animations" },
-  53: { category: "body", subcategory: "animations" },
-  54: { category: "body", subcategory: "animations" },
-  55: { category: "body", subcategory: "animations" },
-  56: { category: "body", subcategory: "animations" },
-  61: { category: "body", subcategory: "animations" },
-  79: { category: "body", subcategory: "heads" },
 };
 
 const ASSET_TYPE_NAME_TO_ID = {
+  tshirt: 2,
   shirt: 11,
   pants: 12,
-  tshirt: 2,
-  tshirtaccessory: 72,
-  jacketaccessory: 64,
-  sweateraccessory: 65,
-  shortsaccessory: 66,
+  tshirtaccessory: 64,
+  shirtaccessory: 65,
+  pantsaccessory: 66,
+  jacketaccessory: 67,
+  sweateraccessory: 68,
+  shortsaccessory: 69,
   leftshoeaccessory: 70,
   rightshoeaccessory: 71,
-  dressskirtaccessory: 69,
+  dressskirtaccessory: 72,
   hat: 8,
   hairaccessory: 41,
   faceaccessory: 42,
@@ -156,78 +91,42 @@ const ASSET_TYPE_NAME_TO_ID = {
   frontaccessory: 45,
   backaccessory: 46,
   waistaccessory: 47,
-  head: 17,
-  face: 18,
-  torso: 27,
-  rightarm: 28,
-  leftarm: 29,
-  leftleg: 30,
-  rightleg: 31,
-  dynamichead: 79,
 };
 
 const CLOTHING_TERMS = {
   all: [
-    "y2k",
-    "streetwear",
-    "jacket",
-    "hoodie",
-    "sweater",
     "shirt",
     "pants",
+    "jacket",
+    "sweater",
+    "hoodie",
+    "t-shirt",
     "dress",
     "skirt",
-    "heels",
-    "boots",
-    "sneakers",
+    "streetwear",
+    "y2k",
   ],
-};
-
-const BODY_TERMS = {
-  all: ["body", "avatar body", "character body", "rthro", "dynamic head", "head", "face"],
-  heads: ["head", "dynamic head", "anime head", "stylized head"],
-  bodies: ["torso", "arms", "legs", "body", "rthro body"],
-  animations: ["animation", "idle animation", "walk animation", "run animation", "emote animation"],
-  hair: ["hair", "hairstyle", "wig", "ponytail", "braid", "curly hair", "wavy hair"],
 };
 
 const ACCESSORY_TERMS_BY_TYPE = {
-  8: ["hat", "cap", "beanie", "hood", "crown"],
-  41: [
-    "hair",
-    "hairstyle",
-    "hair accessory",
-    "wig",
-    "ponytail",
-    "pigtails",
-    "braid",
-    "braids",
-    "bun",
-    "bob",
-    "pixie",
-    "wolf cut",
-    "mullet",
-    "hime cut",
-    "layered hair",
-    "straight hair",
-    "wavy hair",
-    "curly hair",
-    "coily hair",
-    "bangs",
-    "fringe",
-    "black hair",
-    "brown hair",
-    "blonde hair",
-    "white hair",
-    "red hair",
-  ],
-  42: ["face accessory", "mask", "glasses", "bangs", "fringe"],
-  43: ["necklace", "choker", "scarf", "collar"],
-  44: ["shoulder pet", "shoulder accessory", "pauldron"],
-  45: ["front accessory", "chain", "chest rig", "lanyard"],
+  8: ["hat", "cap", "beanie", "crown"],
+  41: ["hair", "hairstyle", "wig", "ponytail", "braid", "bangs"],
+  42: ["face accessory", "mask", "glasses"],
+  43: ["necklace", "choker", "scarf"],
+  44: ["shoulder pet", "pauldron"],
+  45: ["front accessory", "chain"],
   46: ["back accessory", "wings", "cape", "backpack"],
-  47: ["waist accessory", "belt", "tail", "skirt accessory"],
+  47: ["waist accessory", "belt", "tail"],
 };
+
+const SHOE_BUNDLE_TERMS = [
+  "shoes",
+  "heels",
+  "boots",
+  "sneakers",
+  "sandals",
+  "loafer",
+];
 
 let consecutive429 = 0;
 
@@ -247,16 +146,6 @@ function normalizeTypeName(name) {
   return String(name || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
-}
-
-function resolveTypeNameNormalized(item = {}) {
-  return normalizeTypeName(
-    item?.assetTypeName ||
-      item?.assetTypeDisplayName ||
-      item?.assetType ||
-      item?.AssetTypeName ||
-      ""
-  );
 }
 
 function asNumber(v) {
@@ -291,7 +180,6 @@ function hashString(s) {
 function limitedRotatedTerms(source, limit, seed, laneKey) {
   const arr = Array.from(new Set((source || []).map((s) => String(s).trim()).filter(Boolean)));
   if (arr.length === 0 || limit <= 0) return [];
-
   const offset = Math.abs(hashString(`${seed}:${laneKey}`)) % arr.length;
   const rotated = arr.slice(offset).concat(arr.slice(0, offset));
   return rotated.slice(0, Math.min(limit, rotated.length));
@@ -304,7 +192,7 @@ async function fetchJsonWithRetry(url, tries, label) {
     try {
       const res = await fetch(url, {
         headers: {
-          "User-Agent": "ny-catalog-backend/full-crawl",
+          "User-Agent": "ny-catalog-backend/clothing-accessories-crawler",
           Accept: "application/json",
         },
       });
@@ -316,46 +204,28 @@ async function fetchJsonWithRetry(url, tries, label) {
 
       if (res.status === 429) {
         consecutive429 += 1;
-        const waitMs =
-          Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt * attempt) + jitter(700);
-
-        console.log(`[429] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms -> ${url}`);
+        const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt * attempt) + jitter(700);
+        console.log(`[429] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms`);
         await sleep(waitMs);
-
         if (consecutive429 >= RATE_LIMIT_STREAK_TRIGGER) {
-          console.log(
-            `[rate-limit] cooldown ${RATE_LIMIT_COOLDOWN_MS}ms after streak=${consecutive429}`
-          );
+          console.log(`[rate-limit] cooldown ${RATE_LIMIT_COOLDOWN_MS}ms`);
           consecutive429 = 0;
           await sleep(RATE_LIMIT_COOLDOWN_MS);
         }
         continue;
       }
 
-      if (res.status === 400) {
-        const text = await res.text().catch(() => "");
-        console.log(`[400] ${label} give up -> ${url} ${text.slice(0, 220)}`);
-        return null;
-      }
+      if (res.status === 400) return null;
 
       if (res.status >= 500 && attempt < maxAttempts) {
         const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(600);
-        console.log(`[${res.status}] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms`);
         await sleep(waitMs);
         continue;
       }
-
-      const text = await res.text().catch(() => "");
-      console.log(`[${res.status}] ${label} give up -> ${url} ${text.slice(0, 220)}`);
       return null;
-    } catch (err) {
-      if (attempt >= maxAttempts) {
-        console.log(`[error] ${label} give up -> ${url} :: ${err.message}`);
-        return null;
-      }
-
+    } catch {
+      if (attempt >= maxAttempts) return null;
       const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(600);
-      console.log(`[error] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms -> ${err.message}`);
       await sleep(waitMs);
     }
   }
@@ -369,17 +239,10 @@ function buildSearchUrl({ category, subcategory, keyword, cursor }) {
   p.set("Limit", String(PAGE_LIMIT));
   p.set("SortType", "3");
   p.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
-
   if (subcategory !== undefined && subcategory !== null) p.set("Subcategory", String(subcategory));
   if (keyword) p.set("Keyword", String(keyword));
   if (cursor) p.set("Cursor", String(cursor));
-
   return `https://catalog.roblox.com/v1/search/items/details?${p.toString()}`;
-}
-
-async function fetchAssetDetails(assetId) {
-  const url = `https://economy.roblox.com/v2/assets/${assetId}/details`;
-  return fetchJsonWithRetry(url, DETAIL_RETRIES, `asset-detail:${assetId}`);
 }
 
 function buildBundleSearchUrl({ keyword, cursor }) {
@@ -391,47 +254,14 @@ function buildBundleSearchUrl({ keyword, cursor }) {
   return `https://catalog.roblox.com/v1/search/bundles/details?${p.toString()}`;
 }
 
-async function upsertCatalogBundle(record) {
-  if (!record?.bundle_id) return false;
-  await pool.query(
-    `
-    INSERT INTO public.catalog_bundles (
-      bundle_id, name, description,
-      creator_name, creator_id, creator_type,
-      bundle_type, thumbnail_url,
-      category, subcategory, is_offsale, price_robux, updated_at
-    )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
-    ON CONFLICT (bundle_id) DO UPDATE SET
-      name = EXCLUDED.name,
-      description = EXCLUDED.description,
-      creator_name = EXCLUDED.creator_name,
-      creator_id = EXCLUDED.creator_id,
-      creator_type = EXCLUDED.creator_type,
-      bundle_type = EXCLUDED.bundle_type,
-      thumbnail_url = EXCLUDED.thumbnail_url,
-      category = EXCLUDED.category,
-      subcategory = EXCLUDED.subcategory,
-      is_offsale = EXCLUDED.is_offsale,
-      price_robux = EXCLUDED.price_robux,
-      updated_at = NOW()
-    `,
-    [
-      record.bundle_id,
-      record.name,
-      record.description,
-      record.creator_name,
-      record.creator_id,
-      record.creator_type,
-      record.bundle_type,
-      record.thumbnail_url,
-      record.category,
-      record.subcategory,
-      record.is_offsale,
-      record.price_robux,
-    ]
-  );
-  return true;
+async function fetchAssetDetails(assetId) {
+  const url = `https://economy.roblox.com/v2/assets/${assetId}/details`;
+  return fetchJsonWithRetry(url, DETAIL_RETRIES, `asset-detail:${assetId}`);
+}
+
+async function fetchBundleDetails(bundleId) {
+  const url = `https://catalog.roblox.com/v1/bundles/${bundleId}/details`;
+  return fetchJsonWithRetry(url, DETAIL_RETRIES, `bundle-detail:${bundleId}`);
 }
 
 async function ensureSchema() {
@@ -466,21 +296,6 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_catalog_items_category_subcategory
-    ON public.catalog_items (category, subcategory);
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_catalog_items_asset_type_id
-    ON public.catalog_items (asset_type_id);
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_catalog_items_updated_at
-    ON public.catalog_items (updated_at DESC);
-  `);
-
-  await pool.query(`
     CREATE TABLE IF NOT EXISTS public.catalog_bundles (
       bundle_id BIGINT PRIMARY KEY,
       name TEXT,
@@ -496,13 +311,6 @@ async function ensureSchema() {
       price_robux INTEGER,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-  `);
-  await pool.query(`
-    ALTER TABLE public.catalog_bundles
-      ADD COLUMN IF NOT EXISTS creator_type TEXT,
-      ADD COLUMN IF NOT EXISTS bundle_type TEXT,
-      ADD COLUMN IF NOT EXISTS is_offsale BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS price_robux INTEGER;
   `);
 
   await pool.query(`
@@ -581,7 +389,6 @@ function mapCommonFields(item, detail, resolvedTypeId, resolvedTypeName) {
 
 async function upsertCatalogItem(record) {
   if (!record?.asset_id) return false;
-
   await pool.query(
     `
     INSERT INTO public.catalog_items (
@@ -649,16 +456,65 @@ async function upsertCatalogItem(record) {
       JSON.stringify(record.raw || {}),
     ]
   );
-
   return true;
 }
 
-async function processSearchPage(
-  items,
-  metaLookupBudget,
-  requiredAssetTypeId = null,
-  requiredAssetTypeNameNormalized = null
-) {
+async function upsertCatalogBundle(record) {
+  if (!record?.bundle_id) return false;
+  await pool.query(
+    `
+    INSERT INTO public.catalog_bundles (
+      bundle_id, name, description, creator_name, creator_id, creator_type,
+      bundle_type, thumbnail_url, category, subcategory, is_offsale, price_robux, updated_at
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+    ON CONFLICT (bundle_id) DO UPDATE SET
+      name = EXCLUDED.name,
+      description = EXCLUDED.description,
+      creator_name = EXCLUDED.creator_name,
+      creator_id = EXCLUDED.creator_id,
+      creator_type = EXCLUDED.creator_type,
+      bundle_type = EXCLUDED.bundle_type,
+      thumbnail_url = EXCLUDED.thumbnail_url,
+      category = EXCLUDED.category,
+      subcategory = EXCLUDED.subcategory,
+      is_offsale = EXCLUDED.is_offsale,
+      price_robux = EXCLUDED.price_robux,
+      updated_at = NOW()
+    `,
+    [
+      record.bundle_id,
+      record.name,
+      record.description,
+      record.creator_name,
+      record.creator_id,
+      record.creator_type,
+      record.bundle_type,
+      record.thumbnail_url,
+      record.category,
+      record.subcategory,
+      record.is_offsale,
+      record.price_robux,
+    ]
+  );
+  return true;
+}
+
+async function upsertBundleAssetLink(bundleId, assetId, role) {
+  if (!bundleId || !assetId) return;
+  await pool.query(
+    `
+    INSERT INTO public.bundle_asset_links (bundle_id, asset_id, role, updated_at)
+    VALUES ($1,$2,$3,NOW())
+    ON CONFLICT (bundle_id, asset_id) DO UPDATE SET
+      role = EXCLUDED.role,
+      updated_at = NOW()
+    `,
+    [bundleId, assetId, role || null]
+  );
+}
+
+async function processSearchPage(items, metaLookupBudget) {
   let seen = 0;
   let upserts = 0;
   let forcedMetaLookups = 0;
@@ -679,153 +535,104 @@ async function processSearchPage(
       await sleep(ASSET_META_DELAY_MS + jitter(300));
     }
 
-    if (!resolvedTypeId) {
-      const normalizedName = resolveTypeNameNormalized({ assetTypeName: resolvedTypeName });
-      if (normalizedName === "hairaccessory") {
-        resolvedTypeId = 41;
-        resolvedTypeName = "HairAccessory";
-      }
-    }
-
-    if (
-      requiredAssetTypeId !== null &&
-      Number(resolvedTypeId) !== Number(requiredAssetTypeId)
-    ) {
-      continue;
-    }
-
-    if (requiredAssetTypeNameNormalized) {
-      const normalizedResolved = resolveTypeNameNormalized({
-        assetTypeName: resolvedTypeName,
-      });
-      const normalizedItem = resolveTypeNameNormalized(item);
-      const normalizedDetail = resolveTypeNameNormalized(detail || {});
-      const nameMatched =
-        normalizedResolved === requiredAssetTypeNameNormalized ||
-        normalizedItem === requiredAssetTypeNameNormalized ||
-        normalizedDetail === requiredAssetTypeNameNormalized;
-      if (!nameMatched) {
-        continue;
-      }
-    }
-
     const mapped = mapCommonFields(item, detail, resolvedTypeId, resolvedTypeName);
-    if (await upsertCatalogItem(mapped)) upserts += 1;
+    if (mapped.category === "clothing" || mapped.category === "accessories") {
+      if (await upsertCatalogItem(mapped)) upserts += 1;
+    }
   }
 
   return { seen, upserts, forcedMetaLookups };
 }
 
-async function crawlSearchLane({
-  laneLabel,
-  category,
-  subcategory = null,
-  keyword = null,
-  maxPages = 1,
-  maxMetaLookups = MAX_META_LOOKUPS_PER_PASS,
-  requiredAssetTypeId = null,
-  requiredAssetTypeNameNormalized = null,
-}) {
+async function crawlSearchLane({ laneLabel, category, keyword = null, maxPages = 1, maxMetaLookups = MAX_META_LOOKUPS_PER_PASS }) {
   let cursor = null;
   let pages = 0;
   let totalSeen = 0;
   let totalUpserts = 0;
-  let totalForcedMetaLookups = 0;
   const budget = { count: 0, max: Math.max(0, maxMetaLookups) };
-  let laneSubcategory = subcategory;
 
   while (pages < maxPages) {
-    const url = buildSearchUrl({ category, subcategory: laneSubcategory, keyword, cursor });
-    let data = await fetchJsonWithRetry(url, SEARCH_RETRIES, laneLabel);
-    if (!data && cursor === null && laneSubcategory === "HairAccessory") {
-      console.log(
-        `[crawl] ${laneLabel} fallback: retrying without HairAccessory subcategory filter`
-      );
-      laneSubcategory = null;
-      data = await fetchJsonWithRetry(
-        buildSearchUrl({ category, subcategory: laneSubcategory, keyword, cursor }),
-        SEARCH_RETRIES,
-        `${laneLabel}:fallback`
-      );
-    }
+    const url = buildSearchUrl({ category, keyword, cursor });
+    const data = await fetchJsonWithRetry(url, SEARCH_RETRIES, laneLabel);
     if (!data || !Array.isArray(data.data)) break;
 
-    const filteredItems =
-      requiredAssetTypeId === null
-        ? data.data
-        : data.data.filter((it) => {
-            const t = parseAssetTypeId(it);
-            return t === Number(requiredAssetTypeId) || t === null;
-          });
-
-    const { seen, upserts, forcedMetaLookups } = await processSearchPage(
-      filteredItems,
-      budget,
-      requiredAssetTypeId,
-      requiredAssetTypeNameNormalized
-    );
-
+    const { seen, upserts } = await processSearchPage(data.data, budget);
     pages += 1;
     totalSeen += seen;
     totalUpserts += upserts;
-    totalForcedMetaLookups += forcedMetaLookups;
 
-    console.log(
-      `[crawl] ${laneLabel} pages=${pages} seen=${seen} upserts=${upserts} forcedMetaLookups=${forcedMetaLookups}`
-    );
-
+    console.log(`[crawl] ${laneLabel} pages=${pages} seen=${seen} upserts=${upserts}`);
     cursor = data.nextPageCursor || null;
     if (!cursor) break;
-
     await sleep(DELAY_MS + jitter(500));
   }
 
-  console.log(
-    `[crawl] ${laneLabel} totalSeen=${totalSeen} totalUpserts=${totalUpserts} totalForcedMetaLookups=${totalForcedMetaLookups}`
-  );
+  console.log(`[crawl] ${laneLabel} totalSeen=${totalSeen} totalUpserts=${totalUpserts}`);
 }
 
-async function crawlCategorySubcategoryMatrix() {
-  if (MATRIX_PAGES_PER_PAIR <= 0) {
-    console.log("[crawl-matrix] skipped (CRAWL_MATRIX_PAGES_PER_PAIR=0)");
+async function crawlShoeBundles(runSeed) {
+  if (SHOE_BUNDLE_PAGES <= 0) {
+    console.log("[crawl-bundles] skipped (CRAWL_SHOE_BUNDLE_PAGES=0)");
     return;
   }
 
-  for (const category of CATEGORY_MATRIX) {
-    for (const subcategory of SUBCATEGORY_MATRIX) {
-      await crawlSearchLane({
-        laneLabel: `matrix:cat${category}:sub${subcategory}`,
-        category,
-        subcategory,
-        keyword: null,
-        maxPages: MATRIX_PAGES_PER_PAIR,
-        maxMetaLookups: MAX_MATRIX_META_LOOKUPS_PER_PAIR,
-      });
+  const terms = limitedRotatedTerms(
+    SHOE_BUNDLE_TERMS,
+    SHOE_BUNDLE_TERMS.length,
+    runSeed,
+    "shoe-bundles"
+  );
+
+  for (const kw of terms) {
+    let cursor = null;
+    let pages = 0;
+
+    while (pages < SHOE_BUNDLE_PAGES) {
+      const data = await fetchJsonWithRetry(buildBundleSearchUrl({ keyword: kw, cursor }), SEARCH_RETRIES, `shoe-bundle:${kw}`);
+      if (!data || !Array.isArray(data.data)) break;
+
+      for (const b of data.data) {
+        const bundleId = asNumber(b?.id);
+        if (!bundleId) continue;
+
+        const name = String(b?.name || "");
+        if (!/shoe|boot|heel|sneaker|sandal|loafer/i.test(name)) continue;
+
+        const creator = b?.creator || {};
+        await upsertCatalogBundle({
+          bundle_id: bundleId,
+          name,
+          description: String(b?.description || ""),
+          creator_name: String(creator?.name || b?.creatorName || ""),
+          creator_id: asNumber(creator?.id || b?.creatorId),
+          creator_type: String(creator?.type || b?.creatorType || ""),
+          bundle_type: String(b?.bundleType || ""),
+          thumbnail_url: "",
+          category: "clothing",
+          subcategory: "shoes",
+          is_offsale: false,
+          price_robux: asNumber(b?.price || b?.product?.priceInRobux),
+        });
+
+        const details = await fetchBundleDetails(bundleId);
+        const items = Array.isArray(details?.items) ? details.items : [];
+        for (const bi of items) {
+          const assetId = asNumber(bi?.id ?? bi?.assetId);
+          if (!assetId) continue;
+          const t = asNumber(bi?.type ?? bi?.assetType ?? bi?.assetTypeId);
+          let role = null;
+          if (t === 70) role = "left_shoe";
+          if (t === 71) role = "right_shoe";
+          await upsertBundleAssetLink(bundleId, assetId, role);
+        }
+        await sleep(ASSET_META_DELAY_MS + jitter(300));
+      }
+
+      pages += 1;
+      cursor = data.nextPageCursor || null;
+      if (!cursor) break;
       await sleep(DELAY_MS + jitter(500));
     }
-  }
-}
-
-async function crawlAccessorySubcategorySweep() {
-  if (MAX_ACCESSORY_SUBCATEGORY_PAGES_PER_PASS <= 0) {
-    console.log("[crawl-acc-sub] skipped (CRAWL_PAGES_PER_ACCESSORY_SUBCATEGORY_PASS=0)");
-    return;
-  }
-  if (ACCESSORY_SUBCATEGORY_SWEEP_IDS.length === 0) {
-    console.log("[crawl-acc-sub] skipped (no subcategory IDs configured)");
-    return;
-  }
-
-  for (const subcategory of ACCESSORY_SUBCATEGORY_SWEEP_IDS) {
-    await crawlSearchLane({
-      laneLabel: `acc-sub:cat11:sub${subcategory}`,
-      category: ACCESSORIES_CATEGORY,
-      subcategory,
-      keyword: null,
-      maxPages: MAX_ACCESSORY_SUBCATEGORY_PAGES_PER_PASS,
-      maxMetaLookups: MAX_MATRIX_META_LOOKUPS_PER_PAIR,
-    });
-    await sleep(DELAY_MS + jitter(500));
   }
 }
 
@@ -838,37 +645,12 @@ function buildPlans(runSeed) {
       runSeed,
       "clothing:all"
     );
-
     for (const kw of terms) {
       clothingPlan.push({
         laneLabel: `clothing:${kw}`,
         category: CLOTHING_CATEGORY,
-        subcategory: null,
         keyword: kw,
       });
-    }
-  }
-
-  const bodyPlan = [];
-  if (MAX_BODY_PAGES_PER_PASS > 0) {
-    for (const key of Object.keys(BODY_TERMS)) {
-      const terms = limitedRotatedTerms(
-        BODY_TERMS[key],
-        MAX_BODY_TERMS_PER_TAB,
-        runSeed,
-        `body:${key}`
-      );
-
-      for (const kw of terms) {
-        for (const category of BODY_DISCOVERY_CATEGORIES) {
-          bodyPlan.push({
-            laneLabel: `body:${key}:${kw}:cat${category}`,
-            category,
-            subcategory: null,
-            keyword: kw,
-          });
-        }
-      }
     }
   }
 
@@ -880,139 +662,43 @@ function buildPlans(runSeed) {
         terms,
         MAX_ACCESSORY_TERMS_PER_TYPE,
         runSeed,
-        `acc:${typeId}`
+        `accessories:${typeId}`
       );
 
       for (const kw of rotated) {
         accessoryPlan.push({
           laneLabel: `accessories:type${typeId}:${kw}`,
           category: ACCESSORIES_CATEGORY,
-          subcategory: null,
           keyword: kw,
-          requiredAssetTypeId: null,
-          requiredAssetTypeNameNormalized: typeId === 41 ? "hairaccessory" : null,
         });
       }
     }
   }
-
-  return { clothingPlan, bodyPlan, accessoryPlan };
-}
-
-async function crawlShoeBundles() {
-  if (SHOE_BUNDLE_PAGES <= 0) {
-    console.log("[crawl-bundles] skipped (CRAWL_SHOE_BUNDLE_PAGES=0)");
-    return;
-  }
-  console.log("[crawl-bundles] placeholder lane enabled; no-op for now");
-}
-
-async function crawlAnimationBundles(runSeed) {
-  if (ANIMATION_BUNDLE_PAGES <= 0) {
-    console.log("[crawl-animation-bundles] skipped (CRAWL_ANIMATION_BUNDLE_PAGES=0)");
-    return;
-  }
-
-  const terms = limitedRotatedTerms(
-    ANIMATION_BUNDLE_TERMS,
-    MAX_ANIMATION_BUNDLE_TERMS,
-    runSeed,
-    "animation-bundles"
-  );
-
-  for (const kw of terms) {
-    let cursor = null;
-    let pages = 0;
-    let totalSeen = 0;
-    let totalUpserts = 0;
-
-    while (pages < ANIMATION_BUNDLE_PAGES) {
-      const url = buildBundleSearchUrl({ keyword: kw, cursor });
-      const data = await fetchJsonWithRetry(url, SEARCH_RETRIES, `anim-bundle:${kw}`);
-      if (!data || !Array.isArray(data.data)) break;
-
-      let seen = 0;
-      let upserts = 0;
-      for (const b of data.data) {
-        seen += 1;
-        const creator = b?.creator || {};
-        const record = {
-          bundle_id: asNumber(b?.id),
-          name: String(b?.name || ""),
-          description: String(b?.description || ""),
-          creator_name: String(creator?.name || b?.creatorName || ""),
-          creator_id: asNumber(creator?.id || b?.creatorId),
-          creator_type: String(creator?.type || b?.creatorType || ""),
-          bundle_type: String(b?.bundleType || ""),
-          thumbnail_url: "",
-          category: "body",
-          subcategory: "animations",
-          is_offsale: false,
-          price_robux: asNumber(b?.price || b?.product?.priceInRobux),
-        };
-        if (record.bundle_id && (await upsertCatalogBundle(record))) upserts += 1;
-      }
-
-      pages += 1;
-      totalSeen += seen;
-      totalUpserts += upserts;
-      console.log(
-        `[crawl-animation-bundles] kw="${kw}" pages=${pages} seen=${seen} upserts=${upserts}`
-      );
-
-      cursor = data.nextPageCursor || null;
-      if (!cursor) break;
-      await sleep(DELAY_MS + jitter(500));
-    }
-
-    console.log(
-      `[crawl-animation-bundles] kw="${kw}" totalSeen=${totalSeen} totalUpserts=${totalUpserts}`
-    );
-    await sleep(DELAY_MS + jitter(500));
-  }
-}
-
-async function pruneInvalidShoeBundles() {
-  // no-op
+  return { clothingPlan, accessoryPlan };
 }
 
 async function main() {
   try {
     console.log("[startup] crawler config", {
       CRAWL_PAGE_LIMIT_raw: process.env.CRAWL_PAGE_LIMIT,
-      PAGE_LIMIT_computed: PAGE_LIMIT,
       CRAWL_PAGES_PER_CLOTHING_PASS_raw: process.env.CRAWL_PAGES_PER_CLOTHING_PASS,
-      CRAWL_PAGES_PER_BODY_PASS_raw: process.env.CRAWL_PAGES_PER_BODY_PASS,
       CRAWL_PAGES_PER_ACCESSORY_PASS_raw: process.env.CRAWL_PAGES_PER_ACCESSORY_PASS,
-      CRAWL_PAGES_PER_ACCESSORY_SUBCATEGORY_PASS_raw:
-        process.env.CRAWL_PAGES_PER_ACCESSORY_SUBCATEGORY_PASS,
-      CRAWL_ACCESSORY_SUBCATEGORY_SWEEP_IDS_raw:
-        process.env.CRAWL_ACCESSORY_SUBCATEGORY_SWEEP_IDS,
-      CRAWL_MATRIX_PAGES_PER_PAIR_raw: process.env.CRAWL_MATRIX_PAGES_PER_PAIR,
       CRAWL_SHOE_BUNDLE_PAGES_raw: process.env.CRAWL_SHOE_BUNDLE_PAGES,
-      CRAWL_ANIMATION_BUNDLE_PAGES_raw: process.env.CRAWL_ANIMATION_BUNDLE_PAGES,
-      CRAWL_MAX_ANIMATION_BUNDLE_TERMS_raw: process.env.CRAWL_MAX_ANIMATION_BUNDLE_TERMS,
       CRAWL_DELAY_MS_raw: process.env.CRAWL_DELAY_MS,
-      CRAWL_ASSET_META_DELAY_MS_raw: process.env.CRAWL_ASSET_META_DELAY_MS,
+      INCLUDE_NOT_FOR_SALE,
     });
 
     await pool.query("SELECT 1");
-    console.log("DB connected");
     await ensureSchema();
-
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
 
-    await crawlCategorySubcategoryMatrix();
-    await crawlAccessorySubcategorySweep();
-
-    const { clothingPlan, bodyPlan, accessoryPlan } = buildPlans(runSeed);
+    const { clothingPlan, accessoryPlan } = buildPlans(runSeed);
 
     if (MAX_CLOTHING_PAGES_PER_PASS > 0) {
       for (const pass of clothingPlan) {
         await crawlSearchLane({
           laneLabel: pass.laneLabel,
           category: pass.category,
-          subcategory: pass.subcategory,
           keyword: pass.keyword,
           maxPages: MAX_CLOTHING_PAGES_PER_PASS,
           maxMetaLookups: MAX_META_LOOKUPS_PER_PASS,
@@ -1023,33 +709,14 @@ async function main() {
       console.log("[crawl] clothing passes skipped (MAX_CLOTHING_PAGES_PER_PASS=0)");
     }
 
-    if (MAX_BODY_PAGES_PER_PASS > 0) {
-      for (const pass of bodyPlan) {
-        await crawlSearchLane({
-          laneLabel: pass.laneLabel,
-          category: pass.category,
-          subcategory: pass.subcategory,
-          keyword: pass.keyword,
-          maxPages: MAX_BODY_PAGES_PER_PASS,
-          maxMetaLookups: MAX_META_LOOKUPS_PER_PASS,
-        });
-        await sleep(DELAY_MS + jitter(500));
-      }
-    } else {
-      console.log("[crawl] body passes skipped (MAX_BODY_PAGES_PER_PASS=0)");
-    }
-
     if (MAX_ACCESSORY_PAGES_PER_PASS > 0) {
       for (const pass of accessoryPlan) {
         await crawlSearchLane({
           laneLabel: pass.laneLabel,
           category: pass.category,
-          subcategory: pass.subcategory,
           keyword: pass.keyword,
           maxPages: MAX_ACCESSORY_PAGES_PER_PASS,
           maxMetaLookups: MAX_META_LOOKUPS_PER_PASS,
-          requiredAssetTypeId: pass.requiredAssetTypeId ?? null,
-          requiredAssetTypeNameNormalized: pass.requiredAssetTypeNameNormalized ?? null,
         });
         await sleep(DELAY_MS + jitter(500));
       }
@@ -1057,10 +724,7 @@ async function main() {
       console.log("[crawl] accessory passes skipped (MAX_ACCESSORY_PAGES_PER_PASS=0)");
     }
 
-    await crawlShoeBundles();
-    await crawlAnimationBundles(runSeed);
-    await pruneInvalidShoeBundles();
-
+    await crawlShoeBundles(runSeed);
     console.log("Crawl complete");
     process.exit(0);
   } catch (err) {
