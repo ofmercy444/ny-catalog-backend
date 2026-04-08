@@ -414,13 +414,7 @@ app.get("/catalog/search", async (req, reply) => {
     } else if (category === "body" && spec.mode === "body_hair") {
       const params = [];
       let where = `
-        WHERE (
-          i.asset_type_id = ${HAIR_ACCESSORY_TYPE}
-          OR (
-            lower(coalesce(i.name,'')) ~ '(^|[^a-z0-9])(hair|hairstyle|wig|ponytail|pigtails?|braids?|bob|pixie|wolf[ -]?cut|mullet|bangs?|fringe|curly|wavy|straight)([^a-z0-9]|$)'
-            AND lower(coalesce(i.name,'')) !~ '(^|[^a-z0-9])(helmet|halo|horns|mask|crown|headphones|wing|tail|necklace|glasses)([^a-z0-9]|$)'
-          )
-        )
+        WHERE i.asset_type_id = ${HAIR_ACCESSORY_TYPE}
       `;
 
       if (q.length > 0) {
@@ -437,7 +431,6 @@ app.get("/catalog/search", async (req, reply) => {
         FROM public.catalog_items i
         ${where}
         ORDER BY
-          CASE WHEN i.asset_type_id = ${HAIR_ACCESSORY_TYPE} THEN 0 ELSE 1 END,
           i.updated_at DESC,
           i.asset_id DESC
         LIMIT $${limitIdx}
