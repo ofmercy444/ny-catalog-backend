@@ -551,7 +551,7 @@ async function upsertCatalogItem(record) {
   return true;
 }
 
-async function processSearchPage(items, metaLookupBudget) {
+async function processSearchPage(items, metaLookupBudget, requiredAssetTypeId = null) {
   let seen = 0;
   let upserts = 0;
   let forcedMetaLookups = 0;
@@ -572,6 +572,13 @@ async function processSearchPage(items, metaLookupBudget) {
       await sleep(ASSET_META_DELAY_MS + jitter(300));
     }
 
+    if (
+      requiredAssetTypeId !== null &&
+      Number(resolvedTypeId) !== Number(requiredAssetTypeId)
+    ) {
+      continue;
+    }
+
     const mapped = mapCommonFields(item, detail, resolvedTypeId, resolvedTypeName);
     if (await upsertCatalogItem(mapped)) upserts += 1;
   }
@@ -586,6 +593,7 @@ async function crawlSearchLane({
   keyword = null,
   maxPages = 1,
   maxMetaLookups = MAX_META_LOOKUPS_PER_PASS,
+  requiredAssetTypeId = null,
 }) {
   let cursor = null;
   let pages = 0;
@@ -599,7 +607,19 @@ async function crawlSearchLane({
     const data = await fetchJsonWithRetry(url, SEARCH_RETRIES, laneLabel);
     if (!data || !Array.isArray(data.data)) break;
 
-    const { seen, upserts, forcedMetaLookups } = await processSearchPage(data.data, budget);
+    const filteredItems =
+      requiredAssetTypeId === null
+        ? data.data
+        : data.data.filter((it) => {
+            const t = parseAssetTypeId(it);
+            return t === Number(requiredAssetTypeId) || t === null;
+          });
+
+    const { seen, upserts, forcedMetaLookups } = await processSearchPage(
+      filteredItems,
+      budget,
+      requiredAssetTypeId
+    );
 
     pages += 1;
     totalSeen += seen;
@@ -725,6 +745,7 @@ function buildPlans(runSeed) {
           category: ACCESSORIES_CATEGORY,
           subcategory: null,
           keyword: kw,
+          requiredAssetTypeId: typeId,
         });
       }
     }
@@ -815,6 +836,7 @@ async function main() {
           keyword: pass.keyword,
           maxPages: MAX_ACCESSORY_PAGES_PER_PASS,
           maxMetaLookups: MAX_META_LOOKUPS_PER_PASS,
+          requiredAssetTypeId: pass.requiredAssetTypeId ?? null,
         });
         await sleep(DELAY_MS + jitter(500));
       }
