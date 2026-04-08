@@ -46,8 +46,15 @@ const ACCESSORY_UI_TYPES = [
   WAIST_ACCESSORY_TYPE,
 ];
 
-const HAIR_TITLE_REGEX =
-  "((^|[^a-z])(hair|hairstyle|hairdo|wig|bangs?|fringe|ponytail|pigtails?|braids?|twists?|locs?|dreads?|afro|updo)([^a-z]|$)|(^|[^a-z])(bob|pixie)\\s*(cut|hair)?([^a-z]|$)|(^|[^a-z])(wolf[ -]?cut|mullet)([^a-z]|$)|(^|[^a-z])(long|short|medium|mid[ -]?length|straight|wavy|curly|coily|textured|layered|ombre|highlighted|blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange)\\s+hair([^a-z]|$))";
+const HAIR_BASE_REGEX =
+  "(^|[^a-z])(hair|hairstyle|hairdo|wig|weave|extensions?|ponytail|pigtails?|bun|updo|braids?|twists?|locs?|dreads?|afro|bob|lob|pixie|mullet|wolf[ -]?cut|shag|butterfly[ -]?cut|hime[ -]?cut|jellyfish[ -]?cut|octopus[ -]?cut)([^a-z]|$)";
+const HAIR_BANGS_MOD_REGEX = "(^|[^a-z])(with|w\\/|w)\\s+bangs?([^a-z]|$)";
+const HAIR_STYLE_CONTEXT_REGEX =
+  "(^|[^a-z])(curly|curls?|tight curls?|loose curls?|spiral curls?|ringlets?|coily|kinky|wavy|waves?|beachy?[ -]?waves?|straight|pin[ -]?straight|sleek|messy|tousled|layered|choppy|blunt[ -]?cut|feathered|textured|razored|tapered|shaggy|voluminous|fluffy|bouncy)([^a-z]|$).*(^|[^a-z])(hair|hairstyle|wig|bob|lob|pixie|ponytail|bun|updo|braids?|locs?|dreads?)([^a-z]|$)";
+const HAIR_COLOR_CONTEXT_REGEX =
+  "(^|[^a-z])(blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange|teal|turquoise|lavender|lilac)([^a-z]|$).*(^|[^a-z])(hair|hairstyle|wig|bob|lob|pixie|ponytail|bun|updo|braids?|locs?|dreads?|curls?|waves?)([^a-z]|$)";
+const HAIR_AESTHETIC_CONTEXT_REGEX =
+  "((^|[^a-z])(y2k|emo|punk|grunge|goth|kawaii)([^a-z]|$).*(^|[^a-z])(hair|hairstyle|wig|bob|lob|pixie|ponytail|bun|updo|braids?|locs?|dreads?|curls?|waves?)([^a-z]|$)|(^|[^a-z])(hair|hairstyle|wig|bob|lob|pixie|ponytail|bun|updo|braids?|locs?|dreads?|curls?|waves?)([^a-z]|$).*(^|[^a-z])(y2k|emo|punk|grunge|goth|kawaii)([^a-z]|$))";
 
 const CLOTHING_SUBTAB_ALIASES = {
   all: "all",
@@ -347,7 +354,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v16:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v17:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -446,8 +453,25 @@ app.get("/catalog/search", async (req, reply) => {
         where += ` AND i.asset_type_id = ANY($${params.length + 1}::int[])`;
         params.push(spec.allowedTypes);
         if (category === "accessories" && subtab === "hair") {
-          where += ` AND lower(coalesce(i.name,'')) ~ $${params.length + 1}`;
-          params.push(HAIR_TITLE_REGEX);
+          const hairBaseIdx = params.length + 1;
+          params.push(HAIR_BASE_REGEX);
+          const hairBangsIdx = params.length + 1;
+          params.push(HAIR_BANGS_MOD_REGEX);
+          const hairStyleIdx = params.length + 1;
+          params.push(HAIR_STYLE_CONTEXT_REGEX);
+          const hairColorIdx = params.length + 1;
+          params.push(HAIR_COLOR_CONTEXT_REGEX);
+          const hairAestheticIdx = params.length + 1;
+          params.push(HAIR_AESTHETIC_CONTEXT_REGEX);
+          where += `
+            AND (
+              lower(coalesce(i.name,'')) ~ $${hairBaseIdx}
+              OR lower(coalesce(i.name,'')) ~ $${hairBangsIdx}
+              OR lower(coalesce(i.name,'')) ~ $${hairStyleIdx}
+              OR lower(coalesce(i.name,'')) ~ $${hairColorIdx}
+              OR lower(coalesce(i.name,'')) ~ $${hairAestheticIdx}
+            )
+          `;
         }
       } else if (spec.mode === "layered") {
         const layeredIdx = params.length + 1;

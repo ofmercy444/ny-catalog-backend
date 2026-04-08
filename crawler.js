@@ -157,6 +157,9 @@ const ACCESSORY_KEYWORDS = {
     "textured hair",
     "messy hair",
     "fluffy hair",
+    "with bangs",
+    "w bangs",
+    "w/ bangs",
     "bangs",
     "fringe",
     "ponytail",
@@ -171,7 +174,17 @@ const ACCESSORY_KEYWORDS = {
     "bob hair",
     "pixie hair",
     "wolf cut",
+    "shag cut",
+    "butterfly cut",
+    "jellyfish cut",
+    "octopus cut",
+    "lob hair",
+    "bixie hair",
     "mullet hair",
+    "y2k hair",
+    "emo hair",
+    "punk hair",
+    "grunge hair",
     "blonde hair",
     "blond hair",
     "platinum blonde hair",
@@ -274,9 +287,18 @@ const HAIR_FOCUS_KEYWORDS = [
   "textured hair",
   "messy hair",
   "fluffy hair",
+  "with bangs",
+  "w bangs",
+  "w/ bangs",
   "bob hair",
   "pixie hair",
   "wolf cut",
+  "shag cut",
+  "butterfly cut",
+  "jellyfish cut",
+  "octopus cut",
+  "lob hair",
+  "bixie hair",
   "mullet hair",
   "bangs",
   "fringe",
@@ -307,6 +329,10 @@ const HAIR_FOCUS_KEYWORDS = [
   "orange hair",
   "ombre hair",
   "highlighted hair",
+  "y2k hair",
+  "emo hair",
+  "punk hair",
+  "grunge hair",
 ];
 
 const memoryAssetTypeCache = new Map();
@@ -387,11 +413,37 @@ function isShoeLikeTitle(name) {
   );
 }
 
+const HAIR_TITLE_ANCHOR_RE =
+  /(^|[^a-z])(hair|hairstyle|hairdo|wig|weave|extensions?|ponytail|pigtails?|bun|updo|braids?|twists?|locs?|dreads?|afro|bob|lob|pixie|mullet|wolf[ -]?cut|shag|butterfly[ -]?cut|hime[ -]?cut|jellyfish[ -]?cut|octopus[ -]?cut)([^a-z]|$)/;
+const HAIR_BANGS_MOD_RE = /(^|[^a-z])(with|w\/|w)\s+bangs?([^a-z]|$)/;
+const HAIR_BANGS_WORD_RE = /(^|[^a-z])bangs?([^a-z]|$)/;
+const HAIR_STYLE_WORD_RE =
+  /(^|[^a-z])(curly|curls?|tight curls?|loose curls?|spiral curls?|ringlets?|coily|kinky|wavy|waves?|beachy?[ -]?waves?|straight|pin[ -]?straight|sleek|messy|tousled|layered|choppy|blunt[ -]?cut|feathered|textured|razored|tapered|shaggy|voluminous|fluffy|bouncy)([^a-z]|$)/;
+const HAIR_COLOR_WORD_RE =
+  /(^|[^a-z])(blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange|teal|turquoise|lavender|lilac)([^a-z]|$)/;
+const HAIR_HAIR_CONTEXT_RE =
+  /(^|[^a-z])(hair|hairstyle|wig|bob|lob|pixie|ponytail|bun|updo|braids?|locs?|dreads?|curls?|waves?)([^a-z]|$)/;
+const HAIR_AESTHETIC_WORD_RE = /(^|[^a-z])(y2k|emo|punk|grunge|goth|kawaii)([^a-z]|$)/;
+
 function isHairLikeTitle(name) {
   const n = String(name || "").toLowerCase();
-  return /(^|[^a-z])(hair|hairstyle|hairdo|wig|bangs?|fringe|ponytail|pigtails?|braids?|twists?|locs?|dreads?|afro|updo)([^a-z]|$)|(^|[^a-z])(bob|pixie)\s*(cut|hair)?([^a-z]|$)|(^|[^a-z])(wolf[ -]?cut|mullet)([^a-z]|$)|(^|[^a-z])(long|short|medium|mid[ -]?length|straight|wavy|curly|coily|textured|layered|ombre|highlighted|blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange)\s+hair([^a-z]|$)/.test(
-    n
-  );
+  const hasAnchor = HAIR_TITLE_ANCHOR_RE.test(n);
+  const hasBangsWord = HAIR_BANGS_WORD_RE.test(n);
+  const hasBangsModifier = HAIR_BANGS_MOD_RE.test(n);
+  const hasStyle = HAIR_STYLE_WORD_RE.test(n);
+  const hasColor = HAIR_COLOR_WORD_RE.test(n);
+  const hasHairContext = HAIR_HAIR_CONTEXT_RE.test(n);
+  const hasAesthetic = HAIR_AESTHETIC_WORD_RE.test(n);
+  const hasColorContext = hasColor && hasHairContext;
+
+  // Reject "bangs"-only accessory titles (common pollution source).
+  if (hasBangsWord && !hasBangsModifier && !hasAnchor) return false;
+
+  if (hasAnchor) return true;
+  if (hasBangsModifier && (hasStyle || hasColorContext || hasAesthetic || hasHairContext)) return true;
+  if (hasColorContext) return true;
+  if (hasAesthetic && hasHairContext) return true;
+  return false;
 }
 
 function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
@@ -975,6 +1027,7 @@ async function crawlHairFocused(runSeed) {
           }
 
           if (t !== HAIR_ACCESSORY_TYPE) continue;
+          if (!isHairLikeTitle(item.name)) continue;
 
           const classified = classifyByType(t, "accessories", "hair");
           item.category = classified.category;
@@ -1032,6 +1085,7 @@ async function crawlHairDirectSubcategory() {
         .replace(/[^a-z]/g, "");
       const hasHairTypeName = normalizedTypeName === "hairaccessory" || normalizedTypeName === "hair";
       if (!hasExplicitHairType && !hasHairTypeName) continue;
+      if (!isHairLikeTitle(item.name)) continue;
       item.asset_type_id = HAIR_ACCESSORY_TYPE;
       item.asset_type_name = "HairAccessory";
       item.category = "accessories";
