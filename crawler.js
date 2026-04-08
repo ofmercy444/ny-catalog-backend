@@ -14,7 +14,6 @@ const ACCESSORY_DISCOVERY_CATEGORIES = [11, 13];
 
 const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT || 30);
 
-// Separate page budgets by lane
 const MAX_CLOTHING_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_CLOTHING_PASS ??
     process.env.CRAWL_PAGES_PER_SUBTAB ??
@@ -43,11 +42,11 @@ const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRI
 const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 80);
 
 const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_PER_TAB || 6);
-const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 16);
+const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 8);
 const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 8);
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 18);
 
-const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 16);
+const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 3);
 const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 2);
 const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 1200);
 const HAIR_DIRECT_PAGES = Number(process.env.CRAWL_HAIR_DIRECT_PAGES || 2);
@@ -155,85 +154,14 @@ const CLOTHING_KEYWORDS = {
 };
 
 const ACCESSORY_KEYWORDS = {
-  [HAT_ACCESSORY_TYPE]: [
-    "hat",
-    "head accessory",
-    "headband",
-    "beanie",
-    "cap",
-    "beret",
-    "helmet",
-    "bucket hat",
-    "tiara",
-  ],
-  [HAIR_ACCESSORY_TYPE]: [
-    "hair",
-    "hairstyle",
-    "wig",
-    "mullet",
-    "wolf cut",
-    "pixie",
-    "bob",
-    "ponytail",
-    "braid",
-    "braids",
-    "locs",
-    "dreads",
-    "updo",
-    "with bangs",
-    "w/ bangs",
-    "w bangs",
-  ],
-  [FACE_ACCESSORY_TYPE]: [
-    "face accessory",
-    "bangs",
-    "fringe",
-    "face bangs",
-    "mask",
-    "glasses",
-    "goggles",
-    "visor",
-    "sunglasses",
-  ],
-  [NECK_ACCESSORY_TYPE]: [
-    "neck accessory",
-    "necklace",
-    "choker",
-    "scarf",
-    "tie",
-    "pendant",
-    "chain necklace",
-  ],
-  [SHOULDER_ACCESSORY_TYPE]: [
-    "shoulder accessory",
-    "shoulder pet",
-    "shoulder plush",
-    "pauldron",
-    "shoulder bag",
-  ],
-  [FRONT_ACCESSORY_TYPE]: [
-    "front accessory",
-    "crossbody",
-    "front bag",
-    "harness",
-    "front pouch",
-  ],
-  [BACK_ACCESSORY_TYPE]: [
-    "back accessory",
-    "backpack",
-    "wings",
-    "cape",
-    "jetpack",
-    "guitar back",
-  ],
-  [WAIST_ACCESSORY_TYPE]: [
-    "waist accessory",
-    "belt",
-    "waist chain",
-    "fanny pack",
-    "hip bag",
-    "utility belt",
-  ],
+  [HAT_ACCESSORY_TYPE]: ["hat", "head accessory", "headband", "beanie", "cap", "beret", "helmet", "bucket hat", "tiara"],
+  [HAIR_ACCESSORY_TYPE]: ["hair", "hairstyle", "wig"],
+  [FACE_ACCESSORY_TYPE]: ["face accessory", "mask", "glasses", "goggles", "visor", "sunglasses"],
+  [NECK_ACCESSORY_TYPE]: ["neck accessory", "necklace", "choker", "scarf", "tie", "pendant"],
+  [SHOULDER_ACCESSORY_TYPE]: ["shoulder accessory", "shoulder pet", "shoulder plush", "pauldron", "shoulder bag"],
+  [FRONT_ACCESSORY_TYPE]: ["front accessory", "crossbody", "front bag", "harness", "front pouch"],
+  [BACK_ACCESSORY_TYPE]: ["back accessory", "backpack", "wings", "cape", "jetpack", "guitar back"],
+  [WAIST_ACCESSORY_TYPE]: ["waist accessory", "belt", "waist chain", "fanny pack", "hip bag", "utility belt"],
 };
 
 const GLOBAL_STYLE_TERMS = [
@@ -245,12 +173,6 @@ const GLOBAL_STYLE_TERMS = [
   "loud luxury",
   "street luxe",
   "urban chic",
-  "capsule wardrobe",
-  "signature style",
-  "dark coquette",
-  "soft grunge",
-  "cyber y2k",
-  "futuristic y2k",
 ];
 
 const SHOE_BUNDLE_KEYWORDS = [
@@ -258,38 +180,14 @@ const SHOE_BUNDLE_KEYWORDS = [
   "shoe bundle",
   "sneakers",
   "heels",
-  "high heels",
-  "stiletto",
-  "pumps",
-  "platform shoes",
-  "wedge heels",
   "boots",
-  "ankle boots",
-  "knee high boots",
-  "thigh high boots",
   "sandals",
-  "strappy sandals",
-  "loafers",
-  "mules",
-  "clogs",
-  "flats",
-  "mary jane",
-  "oxford shoes",
 ];
 
 const HAIR_FOCUS_KEYWORDS = [
   "hair",
   "hairstyle",
   "wig",
-  "mullet",
-  "wolf cut",
-  "pixie",
-  "bob",
-  "ponytail",
-  "braid",
-  "with bangs",
-  "w/ bangs",
-  "w bangs",
 ];
 
 const memoryAssetTypeCache = new Map();
@@ -319,9 +217,7 @@ function rotatedSlice(list, maxCount, seedKey) {
   const seed = hashSeed(seedKey);
   const start = seed % arr.length;
   const out = [];
-  for (let i = 0; i < maxCount; i += 1) {
-    out.push(arr[(start + i) % arr.length]);
-  }
+  for (let i = 0; i < maxCount; i += 1) out.push(arr[(start + i) % arr.length]);
   return out;
 }
 
@@ -356,25 +252,7 @@ function isBundleLike(raw) {
 
 function isShoeLikeTitle(name) {
   const n = String(name || "").toLowerCase();
-  return (
-    n.includes("shoe") ||
-    n.includes("sneaker") ||
-    n.includes("boot") ||
-    n.includes("heel") ||
-    n.includes("stiletto") ||
-    n.includes("loafer") ||
-    n.includes("sandal") ||
-    n.includes("mary jane") ||
-    n.includes("mule") ||
-    n.includes("clog")
-  );
-}
-
-function isHairTypeCandidate(assetTypeId, assetTypeName) {
-  const t = Number(assetTypeId);
-  if (t === HAIR_ACCESSORY_TYPE) return true;
-  const normalized = String(assetTypeName || "").toLowerCase().replace(/[^a-z]/g, "");
-  return normalized === "hairaccessory" || normalized === "hair";
+  return n.includes("shoe") || n.includes("sneaker") || n.includes("boot") || n.includes("heel");
 }
 
 function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
@@ -385,9 +263,7 @@ function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
   url.searchParams.set("Limit", String(finalLimit));
   url.searchParams.set("SortType", "3");
   url.searchParams.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
-  if (subcategory && String(subcategory).trim()) {
-    url.searchParams.set("Subcategory", String(subcategory).trim());
-  }
+  if (subcategory && String(subcategory).trim()) url.searchParams.set("Subcategory", String(subcategory).trim());
   if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
   if (cursor) url.searchParams.set("Cursor", cursor);
 
@@ -396,6 +272,7 @@ function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
 
 async function fetchJsonWithRetry(url, tries, label) {
   const maxAttempts = Math.max(1, Number(tries) || 0);
+
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const res = await fetch(url, {
@@ -467,25 +344,13 @@ function extractAssetMeta(details) {
   if (!details) return { asset_type_id: null, asset_type_name: "" };
   return {
     asset_type_id: Number(details.AssetTypeId ?? details.assetTypeId ?? null) || null,
-    asset_type_name: String(
-      details.AssetType ??
-        details.assetType ??
-        details.AssetTypeName ??
-        details.assetTypeName ??
-        ""
-    ),
+    asset_type_name: String(details.AssetType ?? details.assetType ?? details.AssetTypeName ?? details.assetTypeName ?? ""),
   };
 }
 
 function normalizeSearchItem(raw) {
   const creator = raw.creator || {};
-  const creatorIdRaw =
-    creator.id ??
-    creator.creatorTargetId ??
-    raw.creatorTargetId ??
-    raw.creatorId ??
-    null;
-
+  const creatorIdRaw = creator.id ?? creator.creatorTargetId ?? raw.creatorTargetId ?? raw.creatorId ?? null;
   const creatorId = Number.isFinite(Number(creatorIdRaw)) ? Number(creatorIdRaw) : null;
   const assetId = Number(raw.id);
 
@@ -500,18 +365,9 @@ function normalizeSearchItem(raw) {
     category: "clothing",
     subcategory: null,
     thumbnail_url: raw.thumbnailUrl || "",
-    is_offsale:
-      raw.itemRestrictions?.includes?.("Offsale") ||
-      raw.isOffsale === true ||
-      false,
-    is_limited:
-      raw.itemRestrictions?.includes?.("Limited") ||
-      raw.isLimited === true ||
-      false,
-    is_limited_unique:
-      raw.itemRestrictions?.includes?.("LimitedUnique") ||
-      raw.isLimitedUnique === true ||
-      false,
+    is_offsale: raw.itemRestrictions?.includes?.("Offsale") || raw.isOffsale === true || false,
+    is_limited: raw.itemRestrictions?.includes?.("Limited") || raw.isLimited === true || false,
+    is_limited_unique: raw.itemRestrictions?.includes?.("LimitedUnique") || raw.isLimitedUnique === true || false,
     price_robux: Number.isFinite(raw.price) ? raw.price : null,
     asset_type_id: toAssetTypeIdFromSearch(raw),
     asset_type_name: toAssetTypeNameFromSearch(raw),
@@ -520,13 +376,7 @@ function normalizeSearchItem(raw) {
 
 function normalizeEconomyAsset(details) {
   const creator = details.Creator || details.creator || {};
-  const creatorIdRaw =
-    creator.Id ??
-    creator.id ??
-    details.CreatorTargetId ??
-    details.creatorTargetId ??
-    null;
-
+  const creatorIdRaw = creator.Id ?? creator.id ?? details.CreatorTargetId ?? details.creatorTargetId ?? null;
   const creatorId = Number.isFinite(Number(creatorIdRaw)) ? Number(creatorIdRaw) : null;
   const assetId = Number(details.AssetId ?? details.assetId ?? details.Id ?? details.id);
   const meta = extractAssetMeta(details);
@@ -861,7 +711,6 @@ async function crawlPass(pass, tabKey, mode, pagesLimit) {
 
     for (const item of items) {
       const t = item.asset_type_id == null ? null : Number(item.asset_type_id);
-
       if (mode === "accessory_type_target" && t !== pass.targetTypeId) continue;
 
       const classified = classifyByType(
@@ -872,7 +721,6 @@ async function crawlPass(pass, tabKey, mode, pagesLimit) {
 
       item.category = classified.category;
       item.subcategory = classified.subcategory;
-
       await upsertItem(item);
       upserts += 1;
     }
@@ -881,7 +729,6 @@ async function crawlPass(pass, tabKey, mode, pagesLimit) {
     pages += 1;
     cursor = json.nextPageCursor || null;
     if (!cursor) break;
-
     await sleep(DELAY_MS + jitter(700));
   }
 
@@ -891,14 +738,10 @@ async function crawlPass(pass, tabKey, mode, pagesLimit) {
 }
 
 async function crawlHairFocused(runSeed) {
-  const hairTerms = rotatedSlice(
-    HAIR_FOCUS_KEYWORDS,
-    MAX_HAIR_TERMS_PER_RUN,
-    `${runSeed}:hairfocus`
-  );
-
+  const hairTerms = rotatedSlice(HAIR_FOCUS_KEYWORDS, MAX_HAIR_TERMS_PER_RUN, `${runSeed}:hairfocus`);
   let totalSeen = 0;
   let totalUpserts = 0;
+  let forcedMetaLookups = 0;
 
   for (const keyword of hairTerms) {
     for (const categoryId of [11, 13]) {
@@ -910,32 +753,30 @@ async function crawlHairFocused(runSeed) {
 
         if (categoryId === 11) {
           const strictUrl = buildSearchUrl({
-            category: categoryId,
+            category: 11,
             keyword,
             cursor,
             limit: PAGE_LIMIT,
             subcategory: "HairAccessory",
           });
-          json = await fetchJsonWithRetry(strictUrl, SEARCH_RETRIES, `hair-focus-strict:${keyword}:cat${categoryId}`);
-
+          json = await fetchJsonWithRetry(strictUrl, SEARCH_RETRIES, `hair-focus-strict:${keyword}:cat11`);
           if (!json) {
             const fallbackUrl = buildSearchUrl({
-              category: categoryId,
+              category: 11,
               keyword,
               cursor,
               limit: PAGE_LIMIT,
             });
-            json = await fetchJsonWithRetry(fallbackUrl, SEARCH_RETRIES, `hair-focus-fallback:${keyword}:cat${categoryId}`);
+            json = await fetchJsonWithRetry(fallbackUrl, SEARCH_RETRIES, `hair-focus-fallback:${keyword}:cat11`);
           }
         } else {
-          // Category 13 fallback only (strict subcategory is unsupported there).
           const fallbackUrl = buildSearchUrl({
-            category: categoryId,
+            category: 13,
             keyword,
             cursor,
             limit: PAGE_LIMIT,
           });
-          json = await fetchJsonWithRetry(fallbackUrl, SEARCH_RETRIES, `hair-focus-fallback:${keyword}:cat${categoryId}`);
+          json = await fetchJsonWithRetry(fallbackUrl, SEARCH_RETRIES, `hair-focus-fallback:${keyword}:cat13`);
         }
 
         if (!json) break;
@@ -948,20 +789,27 @@ async function crawlHairFocused(runSeed) {
 
         let upserts = 0;
         for (const item of items) {
-          const t = item.asset_type_id == null ? null : Number(item.asset_type_id);
+          let t = item.asset_type_id == null ? null : Number(item.asset_type_id);
 
-          // Broad ingestion: if it's canonical hair, mark hair subcategory.
-          if (isHairTypeCandidate(t, item.asset_type_name)) {
-            item.asset_type_id = HAIR_ACCESSORY_TYPE;
-            item.asset_type_name = "HairAccessory";
-            item.category = "accessories";
-            item.subcategory = "hair";
-          } else {
-            // Keep discovered accessory-ish items in accessories lane for later organization.
-            item.category = "accessories";
-            if (!item.subcategory) item.subcategory = "all";
+          if (t == null && forcedMetaLookups < HAIR_META_LOOKUPS_PER_RUN) {
+            const details = await fetchAssetDetailsWithRetry(item.asset_id);
+            if (details) {
+              const meta = extractAssetMeta(details);
+              item.asset_type_id = meta.asset_type_id;
+              item.asset_type_name = meta.asset_type_name;
+              t = meta.asset_type_id == null ? null : Number(meta.asset_type_id);
+            }
+            forcedMetaLookups += 1;
+            await sleep(ASSET_META_DELAY_MS);
           }
 
+          // STRICT 41 ONLY
+          if (Number(t) !== HAIR_ACCESSORY_TYPE) continue;
+
+          item.asset_type_id = HAIR_ACCESSORY_TYPE;
+          item.asset_type_name = "HairAccessory";
+          item.category = "accessories";
+          item.subcategory = "hair";
           await upsertItem(item);
           upserts += 1;
         }
@@ -971,7 +819,7 @@ async function crawlHairFocused(runSeed) {
         pages += 1;
 
         console.log(
-          `[crawl-hair] kw="${keyword}" cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts}`
+          `[crawl-hair] kw="${keyword}" cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts} forcedMetaLookups=${forcedMetaLookups}`
         );
 
         cursor = json.nextPageCursor || null;
@@ -1010,7 +858,9 @@ async function crawlHairDirectSubcategory() {
 
     let upserts = 0;
     for (const item of items) {
-      if (!isHairTypeCandidate(item.asset_type_id, item.asset_type_name)) continue;
+      // STRICT 41 ONLY
+      if (Number(item.asset_type_id) !== HAIR_ACCESSORY_TYPE) continue;
+
       item.asset_type_id = HAIR_ACCESSORY_TYPE;
       item.asset_type_name = "HairAccessory";
       item.category = "accessories";
@@ -1106,7 +956,6 @@ async function crawlShoeBundles(runSeed) {
             const classified = classifyByType(finalType, "clothing", null);
             item.category = classified.category;
             item.subcategory = classified.subcategory;
-
             await upsertItem(item);
 
             let role = null;
@@ -1207,7 +1056,6 @@ async function main() {
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
     const { clothingPlan, accessoryPlan } = buildPlan(runSeed);
 
-    // Hair lanes first
     await crawlHairDirectSubcategory();
     await crawlHairFocused(runSeed);
 
