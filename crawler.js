@@ -436,7 +436,6 @@ function isHairLikeTitle(name) {
   const hasAesthetic = HAIR_AESTHETIC_WORD_RE.test(n);
   const hasColorContext = hasColor && hasHairContext;
 
-  // Reject "bangs"-only accessory titles (common pollution source).
   if (hasBangsWord && !hasBangsModifier && !hasAnchor) return false;
 
   if (hasAnchor) return true;
@@ -444,6 +443,13 @@ function isHairLikeTitle(name) {
   if (hasColorContext) return true;
   if (hasAesthetic && hasHairContext) return true;
   return false;
+}
+
+function isHairTypeCandidate(assetTypeId, assetTypeName) {
+  const t = Number(assetTypeId);
+  if (t === HAIR_ACCESSORY_TYPE) return true;
+  const normalized = String(assetTypeName || "").toLowerCase().replace(/[^a-z]/g, "");
+  return normalized === "hairaccessory" || normalized === "hair";
 }
 
 function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
@@ -1027,9 +1033,11 @@ async function crawlHairFocused(runSeed) {
             await sleep(ASSET_META_DELAY_MS);
           }
 
-          if (t !== HAIR_ACCESSORY_TYPE) continue;
+          if (!isHairTypeCandidate(t, item.asset_type_name)) continue;
 
-          const classified = classifyByType(t, "accessories", "hair");
+          item.asset_type_id = HAIR_ACCESSORY_TYPE;
+          item.asset_type_name = "HairAccessory";
+          const classified = classifyByType(item.asset_type_id, "accessories", "hair");
           item.category = classified.category;
           item.subcategory = classified.subcategory;
           await upsertItem(item);
@@ -1055,60 +1063,67 @@ async function crawlHairFocused(runSeed) {
 }
 
 async function crawlHairDirectSubcategory() {
-  let cursor = null;
-  let pages = 0;
-  let totalSeen = 0;
-  let totalUpserts = 0;
+  let grandSeen = 0;
+  let grandUpserts = 0;
 
-  while (pages < HAIR_DIRECT_PAGES) {
-    const url = buildSearchUrl({
-      category: 11,
-      keyword: "",
-      cursor,
-      limit: PAGE_LIMIT,
-      subcategory: "HairAccessory",
-    });
+  for (const categoryId of [11, 13]) {
+    let cursor = null;
+    let pages = 0;
+    let totalSeen = 0;
+    let totalUpserts = 0;
 
-    const json = await fetchJsonWithRetry(url, SEARCH_RETRIES, "hair-direct:cat11");
-    if (!json) break;
+    while (pages < HAIR_DIRECT_PAGES) {
+      const url = buildSearchUrl({
+        category: categoryId,
+        keyword: "",
+        cursor,
+        limit: PAGE_LIMIT,
+        subcategory: "HairAccessory",
+      });
 
-    const rows = Array.isArray(json.data) ? json.data : [];
-    if (rows.length === 0) break;
+      const json = await fetchJsonWithRetry(url, SEARCH_RETRIES, `hair-direct:cat${categoryId}`);
+      if (!json) break;
 
-    const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
-    let upserts = 0;
+      const rows = Array.isArray(json.data) ? json.data : [];
+      if (rows.length === 0) break;
 
-    for (const item of items) {
-      const hasExplicitHairType = Number(item.asset_type_id) === HAIR_ACCESSORY_TYPE;
-      const normalizedTypeName = String(item.asset_type_name || "")
-        .toLowerCase()
-        .replace(/[^a-z]/g, "");
-      const hasHairTypeName = normalizedTypeName === "hairaccessory" || normalizedTypeName === "hair";
-      if (!hasExplicitHairType && !hasHairTypeName) continue;
-      item.asset_type_id = HAIR_ACCESSORY_TYPE;
-      item.asset_type_name = "HairAccessory";
-      item.category = "accessories";
-      item.subcategory = "hair";
-      await upsertItem(item);
-      upserts += 1;
+      const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
+      let upserts = 0;
+
+      for (const item of items) {
+        const hasExplicitHairType = Number(item.asset_type_id) === HAIR_ACCESSORY_TYPE;
+        const normalizedTypeName = String(item.asset_type_name || "")
+          .toLowerCase()
+          .replace(/[^a-z]/g, "");
+        const hasHairTypeName = normalizedTypeName === "hairaccessory" || normalizedTypeName === "hair";
+        if (!hasExplicitHairType && !hasHairTypeName) continue;
+        item.asset_type_id = HAIR_ACCESSORY_TYPE;
+        item.asset_type_name = "HairAccessory";
+        item.category = "accessories";
+        item.subcategory = "hair";
+        await upsertItem(item);
+        upserts += 1;
+      }
+
+      totalSeen += items.length;
+      totalUpserts += upserts;
+      pages += 1;
+
+      console.log(
+        `[crawl-hair-direct] cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts}`
+      );
+
+      cursor = json.nextPageCursor || null;
+      if (!cursor) break;
+      await sleep(DELAY_MS + jitter(500));
     }
 
-    totalSeen += items.length;
-    totalUpserts += upserts;
-    pages += 1;
-
-    console.log(
-      `[crawl-hair-direct] pages=${pages} seen=${items.length} upserts=${upserts}`
-    );
-
-    cursor = json.nextPageCursor || null;
-    if (!cursor) break;
-    await sleep(DELAY_MS + jitter(500));
+    grandSeen += totalSeen;
+    grandUpserts += totalUpserts;
+    console.log(`[crawl-hair-direct] cat=${categoryId} totalSeen=${totalSeen} totalUpserts=${totalUpserts}`);
   }
 
-  console.log(
-    `[crawl-hair-direct] totalSeen=${totalSeen} totalUpserts=${totalUpserts}`
-  );
+  console.log(`[crawl-hair-direct] all-cats totalSeen=${grandSeen} totalUpserts=${grandUpserts}`);
 }
 
 async function crawlShoeBundles(runSeed) {
@@ -1285,7 +1300,6 @@ async function main() {
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
     const { clothingPlan, accessoryPlan } = buildPlan(runSeed);
 
-    // Hair first so 41 ingestion isn't starved by earlier passes.
     await crawlHairDirectSubcategory();
     await crawlHairFocused(runSeed);
 
