@@ -9,20 +9,24 @@ const pool = new Pool({
       : { rejectUnauthorized: false },
 });
 
+// Roblox catalog categories used by this crawler endpoint
 const CLOTHING_CATEGORY = 3;
-const BODYPARTS_CATEGORY = 4;
 const ACCESSORIES_CATEGORY = 11;
 const AVATAR_ANIMATIONS_CATEGORY = 12;
 const COMMUNITY_CREATIONS_CATEGORY = 13;
 
-const CATEGORY_MATRIX = [3, 4, 11, 12, 13];
+// IMPORTANT: category 4 (BodyParts) is not reliably supported by this endpoint for keyword lanes.
+// We discover body items through supported categories and classify by asset_type_id.
+const BODY_DISCOVERY_CATEGORIES = [ACCESSORIES_CATEGORY, AVATAR_ANIMATIONS_CATEGORY, CLOTHING_CATEGORY];
+
+const CATEGORY_MATRIX = [CLOTHING_CATEGORY, ACCESSORIES_CATEGORY, AVATAR_ANIMATIONS_CATEGORY, COMMUNITY_CREATIONS_CATEGORY];
 const SUBCATEGORY_MATRIX = [
   1, 3, 4, 9, 10, 12, 13, 14, 15, 19, 20, 21, 22, 23, 24, 25, 26, 27,
   37, 38, 39, 40, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66,
 ];
 
 const PAGE_LIMIT = clampLimit(Number(process.env.CRAWL_PAGE_LIMIT || 30));
-const MATRIX_PAGES_PER_PAIR = Number(process.env.CRAWL_MATRIX_PAGES_PER_PAIR || 1);
+const MATRIX_PAGES_PER_PAIR = Number(process.env.CRAWL_MATRIX_PAGES_PER_PAIR || 0);
 
 const MAX_CLOTHING_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_CLOTHING_PASS ??
@@ -32,20 +36,19 @@ const MAX_CLOTHING_PAGES_PER_PASS = Number(
 const MAX_BODY_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_BODY_PASS ??
     process.env.CRAWL_PAGES_PER_SUBTAB ??
-    2
+    0
 );
 const MAX_ACCESSORY_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_ACCESSORY_PASS ??
     process.env.CRAWL_PAGES_PER_SUBTAB ??
-    2
+    0
 );
 
 const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 0);
 
-const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 7000);
+const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 9000);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 1400);
-const INCLUDE_NOT_FOR_SALE =
-  String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
+const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
 const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 1);
 const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 3);
@@ -65,17 +68,13 @@ const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERM
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 2);
 
-const LAYERED_TYPES = new Set([64, 65, 66, 67, 68, 69, 70, 71, 72]);
-const CLASSIC_TYPES = new Set([2, 11, 12]);
-const ACCESSORY_UI_TYPES = new Set([8, 41, 42, 43, 44, 45, 46, 47]);
-const HAIR_ACCESSORY_TYPE = 41;
-const FACE_ACCESSORY_TYPE = 42;
-
 const TYPE_TO_GROUP = {
+  // Classic clothing
   2: { category: "clothing", subcategory: "tops" },
   11: { category: "clothing", subcategory: "shirts" },
   12: { category: "clothing", subcategory: "pants" },
 
+  // Layered clothing / clothing accessories
   64: { category: "clothing", subcategory: "jackets" },
   65: { category: "clothing", subcategory: "sweaters" },
   66: { category: "clothing", subcategory: "shorts" },
@@ -86,6 +85,7 @@ const TYPE_TO_GROUP = {
   71: { category: "clothing", subcategory: "right_shoe" },
   72: { category: "clothing", subcategory: "tops" },
 
+  // Accessories
   8: { category: "accessories", subcategory: "head" },
   41: { category: "accessories", subcategory: "hair" },
   42: { category: "accessories", subcategory: "face" },
@@ -95,6 +95,7 @@ const TYPE_TO_GROUP = {
   46: { category: "accessories", subcategory: "back" },
   47: { category: "accessories", subcategory: "waist" },
 
+  // Body-related canonical types
   17: { category: "body", subcategory: "heads" },
   18: { category: "body", subcategory: "faces" },
   27: { category: "body", subcategory: "bodies" },
@@ -119,7 +120,6 @@ const ASSET_TYPE_NAME_TO_ID = {
   shirt: 11,
   pants: 12,
   tshirt: 2,
-  t_shirt: 2,
   tshirtaccessory: 72,
   jacketaccessory: 64,
   sweateraccessory: 65,
@@ -167,10 +167,11 @@ const BODY_TERMS = {
   heads: ["head", "dynamic head", "anime head", "stylized head"],
   bodies: ["torso", "arms", "legs", "body", "rthro body"],
   animations: ["animation", "idle animation", "walk animation", "run animation", "emote animation"],
+  hair: ["hair", "hairstyle", "wig", "ponytail", "braid", "curly hair", "wavy hair"],
 };
 
 const ACCESSORY_TERMS_BY_TYPE = {
-  8: ["hat", "bangs", "cap", "beanie", "hood", "crown"],
+  8: ["hat", "cap", "beanie", "hood", "crown"],
   41: ["hair", "hairstyle", "wig", "ponytail", "braid", "curly", "wavy", "straight"],
   42: ["face accessory", "mask", "glasses", "bangs", "fringe"],
   43: ["necklace", "choker", "scarf", "collar"],
@@ -183,40 +184,42 @@ const ACCESSORY_TERMS_BY_TYPE = {
 let consecutive429 = 0;
 
 function clampLimit(n) {
-  if (n === 10 || n === 28 || n === 30) return n;
-  return 30;
+  return n === 10 || n === 28 || n === 30 ? n : 30;
 }
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
 function jitter(max = 500) {
   return Math.floor(Math.random() * max);
 }
+
 function normalizeTypeName(name) {
   return String(name || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
 }
+
 function asNumber(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
+
 function parseAssetTypeId(item = {}) {
-  const fromId = asNumber(item.assetType);
-  if (fromId !== null) return fromId;
+  const fromAssetType = asNumber(item.assetType);
+  if (fromAssetType !== null) return fromAssetType;
+  const fromAssetTypeId = asNumber(item.assetTypeId);
+  if (fromAssetTypeId !== null) return fromAssetTypeId;
+
   const name = normalizeTypeName(item.assetTypeName || item.assetTypeDisplayName || "");
   return ASSET_TYPE_NAME_TO_ID[name] ?? null;
 }
+
 function classifyByType(assetTypeId) {
   return TYPE_TO_GROUP[Number(assetTypeId)] || { category: "unknown", subcategory: "unknown" };
 }
-function limitedRotatedTerms(source, limit, seed, laneKey) {
-  const arr = Array.from(new Set((source || []).map((s) => String(s).trim()).filter(Boolean)));
-  if (arr.length === 0 || limit <= 0) return [];
-  const offset = Math.abs(hashString(`${seed}:${laneKey}`)) % arr.length;
-  const rotated = arr.slice(offset).concat(arr.slice(0, offset));
-  return rotated.slice(0, Math.min(limit, rotated.length));
-}
+
 function hashString(s) {
   let h = 2166136261;
   for (let i = 0; i < s.length; i += 1) {
@@ -226,8 +229,18 @@ function hashString(s) {
   return h >>> 0;
 }
 
+function limitedRotatedTerms(source, limit, seed, laneKey) {
+  const arr = Array.from(new Set((source || []).map((s) => String(s).trim()).filter(Boolean)));
+  if (arr.length === 0 || limit <= 0) return [];
+
+  const offset = Math.abs(hashString(`${seed}:${laneKey}`)) % arr.length;
+  const rotated = arr.slice(offset).concat(arr.slice(0, offset));
+  return rotated.slice(0, Math.min(limit, rotated.length));
+}
+
 async function fetchJsonWithRetry(url, tries, label) {
   const maxAttempts = Math.max(1, Number(tries) || 0);
+
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const res = await fetch(url, {
@@ -246,8 +259,10 @@ async function fetchJsonWithRetry(url, tries, label) {
         consecutive429 += 1;
         const waitMs =
           Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt * attempt) + jitter(700);
+
         console.log(`[429] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms -> ${url}`);
         await sleep(waitMs);
+
         if (consecutive429 >= RATE_LIMIT_STREAK_TRIGGER) {
           console.log(
             `[rate-limit] cooldown ${RATE_LIMIT_COOLDOWN_MS}ms after streak=${consecutive429}`
@@ -279,11 +294,13 @@ async function fetchJsonWithRetry(url, tries, label) {
         console.log(`[error] ${label} give up -> ${url} :: ${err.message}`);
         return null;
       }
+
       const waitMs = Math.min(MAX_RETRY_BACKOFF_MS, RETRY_BASE_MS * attempt) + jitter(600);
       console.log(`[error] ${label} retry ${attempt}/${maxAttempts} in ${waitMs}ms -> ${err.message}`);
       await sleep(waitMs);
     }
   }
+
   return null;
 }
 
@@ -293,9 +310,11 @@ function buildSearchUrl({ category, subcategory, keyword, cursor }) {
   p.set("Limit", String(PAGE_LIMIT));
   p.set("SortType", "3");
   p.set("IncludeNotForSale", INCLUDE_NOT_FOR_SALE ? "true" : "false");
+
   if (subcategory !== undefined && subcategory !== null) p.set("Subcategory", String(subcategory));
   if (keyword) p.set("Keyword", String(keyword));
   if (cursor) p.set("Cursor", String(cursor));
+
   return `https://catalog.roblox.com/v1/search/items/details?${p.toString()}`;
 }
 
@@ -381,16 +400,11 @@ function mapCommonFields(item, detail, resolvedTypeId, resolvedTypeName) {
   const creatorId = asNumber(creator?.id ?? item?.creatorTargetId);
   const creatorType = creator?.type || item?.creatorType || "";
   const creatorTargetId = asNumber(item?.creatorTargetId ?? creator?.id);
-  const creatorShopName =
-    item?.creatorName || detail?.creator?.name || detail?.creatorName || "";
 
   const name = item?.name || detail?.name || "";
   const description = item?.description || detail?.description || "";
   const itemUrl = item?.itemUrl || (item?.id ? `https://www.roblox.com/catalog/${item.id}` : null);
-  const thumbnail =
-    item?.thumbnailUrl ||
-    item?.thumbnail ||
-    null;
+  const thumbnail = item?.thumbnailUrl || item?.thumbnail || null;
 
   const typeId = resolvedTypeId ?? parseAssetTypeId(item) ?? parseAssetTypeId(detail) ?? null;
   const typeName =
@@ -410,7 +424,7 @@ function mapCommonFields(item, detail, resolvedTypeId, resolvedTypeName) {
     creator_name: creatorName,
     creator_type: creatorType,
     creator_target_id: creatorTargetId,
-    creator_shop_name: creatorShopName,
+    creator_shop_name: creatorName,
     price_robux: asNumber(item?.price ?? detail?.priceInRobux),
     is_for_sale:
       typeof item?.isForSale === "boolean"
@@ -445,6 +459,7 @@ function mapCommonFields(item, detail, resolvedTypeId, resolvedTypeName) {
 
 async function upsertCatalogItem(record) {
   if (!record?.asset_id) return false;
+
   await pool.query(
     `
     INSERT INTO public.catalog_items (
@@ -512,6 +527,7 @@ async function upsertCatalogItem(record) {
       JSON.stringify(record.raw || {}),
     ]
   );
+
   return true;
 }
 
@@ -522,6 +538,7 @@ async function processSearchPage(items, metaLookupBudget) {
 
   for (const item of items || []) {
     seen += 1;
+
     let resolvedTypeId = parseAssetTypeId(item);
     let resolvedTypeName = item?.assetTypeName || null;
     let detail = null;
@@ -555,7 +572,6 @@ async function crawlSearchLane({
   let totalSeen = 0;
   let totalUpserts = 0;
   let totalForcedMetaLookups = 0;
-
   const budget = { count: 0, max: Math.max(0, maxMetaLookups) };
 
   while (pages < maxPages) {
@@ -564,6 +580,7 @@ async function crawlSearchLane({
     if (!data || !Array.isArray(data.data)) break;
 
     const { seen, upserts, forcedMetaLookups } = await processSearchPage(data.data, budget);
+
     pages += 1;
     totalSeen += seen;
     totalUpserts += upserts;
@@ -614,8 +631,14 @@ function buildPlans(runSeed) {
       runSeed,
       "clothing:all"
     );
+
     for (const kw of terms) {
-      clothingPlan.push({ category: CLOTHING_CATEGORY, subcategory: null, keyword: kw, label: `clothing:${kw}` });
+      clothingPlan.push({
+        laneLabel: `clothing:${kw}`,
+        category: CLOTHING_CATEGORY,
+        subcategory: null,
+        keyword: kw,
+      });
     }
   }
 
@@ -628,33 +651,37 @@ function buildPlans(runSeed) {
         runSeed,
         `body:${key}`
       );
+
       for (const kw of terms) {
-        bodyPlan.push({
-          category: BODYPARTS_CATEGORY,
-          subcategory: null,
-          keyword: kw,
-          label: `body:${key}:${kw}`,
-        });
+        for (const category of BODY_DISCOVERY_CATEGORIES) {
+          bodyPlan.push({
+            laneLabel: `body:${key}:${kw}:cat${category}`,
+            category,
+            subcategory: null,
+            keyword: kw,
+          });
+        }
       }
     }
   }
 
   const accessoryPlan = [];
   if (MAX_ACCESSORY_PAGES_PER_PASS > 0) {
-    for (const [typeIdStr, termsArr] of Object.entries(ACCESSORY_TERMS_BY_TYPE)) {
+    for (const [typeIdStr, terms] of Object.entries(ACCESSORY_TERMS_BY_TYPE)) {
       const typeId = Number(typeIdStr);
-      const terms = limitedRotatedTerms(
-        termsArr,
+      const rotated = limitedRotatedTerms(
+        terms,
         MAX_ACCESSORY_TERMS_PER_TYPE,
         runSeed,
         `acc:${typeId}`
       );
-      for (const kw of terms) {
+
+      for (const kw of rotated) {
         accessoryPlan.push({
+          laneLabel: `accessories:type${typeId}:${kw}`,
           category: ACCESSORIES_CATEGORY,
           subcategory: null,
           keyword: kw,
-          label: `accessories:type${typeId}:${kw}`,
         });
       }
     }
@@ -672,7 +699,7 @@ async function crawlShoeBundles() {
 }
 
 async function pruneInvalidShoeBundles() {
-  // Keep as no-op; preserving existing flow without touching bundle tables.
+  // no-op
 }
 
 async function main() {
@@ -702,7 +729,7 @@ async function main() {
     if (MAX_CLOTHING_PAGES_PER_PASS > 0) {
       for (const pass of clothingPlan) {
         await crawlSearchLane({
-          laneLabel: pass.label,
+          laneLabel: pass.laneLabel,
           category: pass.category,
           subcategory: pass.subcategory,
           keyword: pass.keyword,
@@ -718,7 +745,7 @@ async function main() {
     if (MAX_BODY_PAGES_PER_PASS > 0) {
       for (const pass of bodyPlan) {
         await crawlSearchLane({
-          laneLabel: pass.label,
+          laneLabel: pass.laneLabel,
           category: pass.category,
           subcategory: pass.subcategory,
           keyword: pass.keyword,
@@ -734,7 +761,7 @@ async function main() {
     if (MAX_ACCESSORY_PAGES_PER_PASS > 0) {
       for (const pass of accessoryPlan) {
         await crawlSearchLane({
-          laneLabel: pass.label,
+          laneLabel: pass.laneLabel,
           category: pass.category,
           subcategory: pass.subcategory,
           keyword: pass.keyword,
