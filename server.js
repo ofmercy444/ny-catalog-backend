@@ -143,7 +143,7 @@ function getSubtabSpec(category, subtab) {
     if (subtab === "hair") return { mode: "body_hair" };
     if (subtab === "heads") return { mode: "typed", allowedTypes: [17, 79] };
     if (subtab === "bodies") return { mode: "typed", allowedTypes: [27, 28, 29, 30, 31] };
-    if (subtab === "animations") return { mode: "body_animation_bundles" };
+    if (subtab === "animations") return { mode: "typed", allowedTypes: [48, 49, 50, 51, 52, 53, 54, 55, 56, 61] };
     if (subtab === "body_color" || subtab === "body_scale") return { mode: "none" };
     return { mode: "typed", allowedTypes: [17, 79, 27, 28, 29, 30, 31, 48, 49, 50, 51, 52, 53, 54, 55, 56, 61] };
   }
