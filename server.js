@@ -38,13 +38,13 @@ const CLASSIC_TYPES = [CLASSIC_TSHIRT_TYPE, CLASSIC_SHIRT_TYPE, CLASSIC_PANTS_TY
 
 const ACCESSORY_UI_TYPES = [
   HAT_ACCESSORY_TYPE,
+  HAIR_ACCESSORY_TYPE,
   FACE_ACCESSORY_TYPE,
   NECK_ACCESSORY_TYPE,
   SHOULDER_ACCESSORY_TYPE,
   FRONT_ACCESSORY_TYPE,
   BACK_ACCESSORY_TYPE,
   WAIST_ACCESSORY_TYPE,
-  HAIR_ACCESSORY_TYPE,
 ];
 
 const CLOTHING_SUBTAB_ALIASES = {
@@ -59,6 +59,7 @@ const CLOTHING_SUBTAB_ALIASES = {
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
+
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -92,49 +93,6 @@ const ACCESSORY_SUBTAB_ALIASES = {
 
 const ACCESSORY_SUBTAB_SET = new Set(Object.values(ACCESSORY_SUBTAB_ALIASES));
 const CLOTHING_SUBTAB_SET = new Set(Object.values(CLOTHING_SUBTAB_ALIASES));
-
-const HAIR_ANCHOR_RE =
-  /(^|[^a-z0-9])(hair|hairstyle|wig|weave|extensions?|ponytail|pigtails?|braids?|locs?|dreads?|bun|updo|bob|lob|pixie|mullet|wolf[ -]?cut|shag|hime[ -]?cut|jellyfish[ -]?cut|octopus[ -]?cut|butterfly[ -]?cut)([^a-z0-9]|$)/i;
-const HAIR_STYLE_RE =
-  /(^|[^a-z0-9])(bun|double bun|space buns|odango|ponytail|pigtails?|braids?|french braid|dutch braid|fishtail braid|cornrows|twists|layered|shag|wolf cut|hime cut|blunt cut|undercut|fade|bangs?|spiky hair|slick back|half up half down|bantu knots|dreadlocks|locs)([^a-z0-9]|$)/i;
-const HAIR_TEXTURE_RE =
-  /(^|[^a-z0-9])(curly|curls?|coily|kinky|wavy|waves?|crimped|straight|silky|sleek|glass hair|frizzy|messy|tousled|fluffy|voluminous|thick|coarse|fine|smooth|wet look|damp|defined curls|flowing strands)([^a-z0-9]|$)/i;
-const HAIR_COLOR_RE =
-  /(^|[^a-z0-9])(brunette|brown|blonde|blond|platinum|ginger|auburn|red|burgundy|black|jet black|silver|gray|grey|white|pink|purple|violet|blue|teal|turquoise|green|emerald|ombre|balayage|highlights|split dye|rainbow|holographic|iridescent|gradient)([^a-z0-9]|$)/i;
-const HAIR_AESTHETIC_RE =
-  /(^|[^a-z0-9])(y2k|kawaii|coquette|harajuku|magical girl|anime|goth|punk|emo|grunge|streetwear|techwear|cyberpunk|futuristic|cosplay|vtuber|chibi|angelcore|demoncore|fairycore)([^a-z0-9]|$)/i;
-const HAIR_BANGS_WORD_RE = /(^|[^a-z0-9])bangs?([^a-z0-9]|$)/i;
-const HAIR_BANGS_MOD_RE = /(^|[^a-z0-9])(with|w\/|w)\s+bangs?([^a-z0-9]|$)/i;
-const HAIR_NOISE_RE = /(^|[^a-z0-9])(horns|halo|headphones|mask|crown|helmet)([^a-z0-9]|$)/i;
-
-function computeHairScore(title, assetTypeId) {
-  const t = String(title || "").toLowerCase();
-
-  const hasAnchor = HAIR_ANCHOR_RE.test(t);
-  const hasStyle = HAIR_STYLE_RE.test(t);
-  const hasTexture = HAIR_TEXTURE_RE.test(t);
-  const hasColor = HAIR_COLOR_RE.test(t);
-  const hasAesthetic = HAIR_AESTHETIC_RE.test(t);
-  const hasNoise = HAIR_NOISE_RE.test(t);
-  const hasBangsWord = HAIR_BANGS_WORD_RE.test(t);
-  const hasBangsMod = HAIR_BANGS_MOD_RE.test(t);
-
-  if (!hasAnchor) return { approved: false, score: 0 };
-  if (!hasStyle && !hasTexture) return { approved: false, score: 0 };
-  if (hasBangsWord && !hasBangsMod && !hasStyle && !hasTexture) return { approved: false, score: 0 };
-
-  let score = 0;
-  if (Number(assetTypeId) === HAIR_ACCESSORY_TYPE) score += 2;
-  if (hasAnchor) score += 2;
-  if (hasStyle) score += 2;
-  if (hasTexture) score += 2;
-  if (hasColor) score += 1;
-  if (hasAesthetic) score += 1;
-  if (hasBangsMod) score += 1;
-  if (hasNoise && !hasStyle && !hasTexture) score -= 3;
-
-  return { approved: score >= 5, score };
-}
 
 function normalizeCategory(rawCategory, rawSubtab) {
   const c = String(rawCategory || "").toLowerCase().trim();
@@ -171,7 +129,7 @@ function getSubtabSpec(category, subtab) {
     if (subtab === "front") return { mode: "typed", allowedTypes: [FRONT_ACCESSORY_TYPE] };
     if (subtab === "back") return { mode: "typed", allowedTypes: [BACK_ACCESSORY_TYPE] };
     if (subtab === "waist") return { mode: "typed", allowedTypes: [WAIST_ACCESSORY_TYPE] };
-    if (subtab === "hair") return { mode: "hair_qualified", allowedTypes: ACCESSORY_UI_TYPES };
+    if (subtab === "hair") return { mode: "typed", allowedTypes: [HAIR_ACCESSORY_TYPE] };
     return { mode: "typed", allowedTypes: ACCESSORY_UI_TYPES };
   }
 
@@ -388,7 +346,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v21:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v22:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -475,33 +433,6 @@ app.get("/catalog/search", async (req, reply) => {
       `;
       ({ rows } = await pool.query(sql, params));
       nextOffset = rows.length === limit ? offset + limit : null;
-    } else if (category === "accessories" && spec.mode === "hair_qualified") {
-      const params = ["accessories", spec.allowedTypes];
-      let where = `
-        WHERE lower(i.category) = $1
-          AND i.asset_type_id = ANY($2::int[])
-      `;
-
-      if (q.length > 0) {
-        params.push(`%${q}%`);
-        where += ` AND lower(coalesce(i.name,'')) LIKE $${params.length}`;
-      }
-
-      const fetchLimit = Math.min(400, Math.max(140, limit * 8 + offset));
-      params.push(fetchLimit);
-
-      const sql = `
-        SELECT ${assetSelect()}
-        FROM public.catalog_items i
-        ${where}
-        ORDER BY i.updated_at DESC, i.asset_id DESC
-        LIMIT $${params.length};
-      `;
-      ({ rows } = await pool.query(sql, params));
-
-      const filtered = rows.filter((r) => computeHairScore(r.name, r.asset_type_id).approved);
-      rows = filtered.slice(offset, offset + limit);
-      nextOffset = filtered.length > offset + limit ? offset + limit : null;
     } else {
       const params = [category];
       let where = "WHERE lower(i.category) = $1";
