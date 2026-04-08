@@ -10,6 +10,7 @@ const pool = new Pool({
 });
 
 const CLOTHING_CATEGORY = 3;
+const BODYPARTS_CATEGORY = 4;
 const ACCESSORY_DISCOVERY_CATEGORIES = [11, 13];
 
 const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT || 30);
@@ -17,18 +18,23 @@ const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT || 30);
 const MAX_CLOTHING_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_CLOTHING_PASS ??
     process.env.CRAWL_PAGES_PER_SUBTAB ??
-    1
+    0
+);
+const MAX_BODY_PAGES_PER_PASS = Number(
+  process.env.CRAWL_PAGES_PER_BODY_PASS ??
+    process.env.CRAWL_PAGES_PER_SUBTAB ??
+    2
 );
 const MAX_ACCESSORY_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_ACCESSORY_PASS ??
     process.env.CRAWL_PAGES_PER_SUBTAB ??
-    1
+    2
 );
 
 const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 0);
 
-const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 11000);
-const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 1700);
+const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 9000);
+const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 1600);
 const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
 const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 0);
@@ -37,19 +43,15 @@ const RETRY_BASE_MS = Number(process.env.CRAWL_RETRY_BASE_MS || 1200);
 const MAX_RETRY_BACKOFF_MS = Number(process.env.CRAWL_MAX_RETRY_BACKOFF_MS || 12000);
 
 const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 240000);
-const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 14);
+const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 12);
 
 const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 60);
 
-const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_PER_TAB || 2);
-const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 4);
-const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 2);
+const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_PER_TAB || 1);
+const MAX_BODY_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_BODY_TERMS_PER_TAB || 8);
+const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 8);
+const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 0);
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 0);
-
-const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 0);
-const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 0);
-const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 0);
-const HAIR_DIRECT_PAGES = Number(process.env.CRAWL_HAIR_DIRECT_PAGES || 0);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 2);
 
@@ -57,6 +59,7 @@ console.log("[startup] crawler config", {
   CRAWL_PAGE_LIMIT_raw: process.env.CRAWL_PAGE_LIMIT,
   PAGE_LIMIT_computed: PAGE_LIMIT,
   CRAWL_PAGES_PER_CLOTHING_PASS_raw: process.env.CRAWL_PAGES_PER_CLOTHING_PASS,
+  CRAWL_PAGES_PER_BODY_PASS_raw: process.env.CRAWL_PAGES_PER_BODY_PASS,
   CRAWL_PAGES_PER_ACCESSORY_PASS_raw: process.env.CRAWL_PAGES_PER_ACCESSORY_PASS,
   CRAWL_PAGES_PER_SUBTAB_raw: process.env.CRAWL_PAGES_PER_SUBTAB,
   CRAWL_SHOE_BUNDLE_PAGES_raw: process.env.CRAWL_SHOE_BUNDLE_PAGES,
@@ -106,6 +109,26 @@ const TYPE_TO_GROUP = {
   71: { category: "clothing", subcategory: "shoes" },
   72: { category: "clothing", subcategory: "dresses_skirts" },
 
+  // Body-related canonical types
+  17: { category: "body", subcategory: "heads" },
+  18: { category: "body", subcategory: "faces" },
+  27: { category: "body", subcategory: "bodies" },
+  28: { category: "body", subcategory: "bodies" },
+  29: { category: "body", subcategory: "bodies" },
+  30: { category: "body", subcategory: "bodies" },
+  31: { category: "body", subcategory: "bodies" },
+  48: { category: "body", subcategory: "animations" },
+  49: { category: "body", subcategory: "animations" },
+  50: { category: "body", subcategory: "animations" },
+  51: { category: "body", subcategory: "animations" },
+  52: { category: "body", subcategory: "animations" },
+  53: { category: "body", subcategory: "animations" },
+  54: { category: "body", subcategory: "animations" },
+  55: { category: "body", subcategory: "animations" },
+  56: { category: "body", subcategory: "animations" },
+  61: { category: "body", subcategory: "animations" },
+  79: { category: "body", subcategory: "heads" },
+
   [HAT_ACCESSORY_TYPE]: { category: "accessories", subcategory: "hats" },
   [HAIR_ACCESSORY_TYPE]: { category: "accessories", subcategory: "hair" },
   [FACE_ACCESSORY_TYPE]: { category: "accessories", subcategory: "faces" },
@@ -120,6 +143,13 @@ const ASSET_TYPE_NAME_TO_ID = {
   tshirt: 2,
   shirt: 11,
   pants: 12,
+  head: 17,
+  face: 18,
+  torso: 27,
+  rightarm: 28,
+  leftarm: 29,
+  leftleg: 30,
+  rightleg: 31,
   hat: 8,
   hairaccessory: 41,
   faceaccessory: 42,
@@ -137,25 +167,35 @@ const ASSET_TYPE_NAME_TO_ID = {
   leftshoeaccessory: 70,
   rightshoeaccessory: 71,
   dressskirtaccessory: 72,
+  dynamichead: 79,
 };
 
 const CLOTHING_KEYWORDS = {
-  all: ["", "y2k", "vintage", "streetwear", "retro", "high fashion"],
-  classic_shirts: ["classic shirt", "2d shirt"],
-  classic_pants: ["classic pants", "2d pants"],
-  classic_t_shirts: ["classic t-shirt", "classic tee"],
-  shirts: ["layered shirt", "shirt"],
-  jackets: ["layered jacket", "jacket"],
-  sweaters: ["layered sweater", "sweater"],
-  t_shirts: ["layered t shirt", "t-shirt"],
-  pants: ["layered pants", "pants"],
-  shorts: ["layered shorts", "shorts"],
-  dresses_skirts: ["layered dress", "dress", "skirt"],
+  all: ["", "y2k"],
+  classic_shirts: ["classic shirt"],
+  classic_pants: ["classic pants"],
+  classic_t_shirts: ["classic t-shirt"],
+  shirts: ["layered shirt"],
+  jackets: ["layered jacket"],
+  sweaters: ["layered sweater"],
+  t_shirts: ["layered t shirt"],
+  pants: ["layered pants"],
+  shorts: ["layered shorts"],
+  dresses_skirts: ["layered dress"],
+};
+
+const BODY_KEYWORDS = {
+  all: ["body", "avatar body", "character body", "rthro", "dynamic head", "head", "face", "hair", "hairstyle"],
+  heads: ["head", "dynamic head", "anime head", "stylized head"],
+  faces: ["face", "facial", "anime face"],
+  bodies: ["torso", "arms", "legs", "body", "rthro body"],
+  animations: ["animation", "idle animation", "walk animation", "run animation", "emote animation"],
+  hair: ["hair", "hairstyle", "wig", "ponytail", "braid", "bob", "pixie", "wolf cut", "mullet", "with bangs"],
 };
 
 const ACCESSORY_KEYWORDS = {
   [HAT_ACCESSORY_TYPE]: ["hat", "headband", "beanie", "cap"],
-  [HAIR_ACCESSORY_TYPE]: ["hair", "hairstyle", "wig", "ponytail", "braid", "bob", "pixie", "wolf cut", "mullet"],
+  [HAIR_ACCESSORY_TYPE]: ["hair", "hairstyle", "wig", "ponytail", "braid", "bob", "pixie", "wolf cut", "mullet", "with bangs"],
   [FACE_ACCESSORY_TYPE]: ["face accessory", "bangs", "fringe", "mask", "glasses"],
   [NECK_ACCESSORY_TYPE]: ["neck accessory", "necklace", "choker", "scarf"],
   [SHOULDER_ACCESSORY_TYPE]: ["shoulder accessory", "shoulder pet", "pauldron"],
@@ -164,29 +204,8 @@ const ACCESSORY_KEYWORDS = {
   [WAIST_ACCESSORY_TYPE]: ["waist accessory", "belt", "waist chain"],
 };
 
-// Shared discovery terms are now run in a dedicated shared pass (not blasted into all type lanes)
-const ACCESSORY_SHARED_DISCOVERY_TERMS = [
-  "hair",
-  "hairstyle",
-  "wig",
-  "mullet",
-  "wolf cut",
-  "pixie",
-  "bob",
-  "ponytail",
-  "braid",
-  "with bangs",
-  "w/ bangs",
-  "w bangs",
-  "y2k",
-  "emo",
-  "punk",
-  "grunge",
-];
-
-const GLOBAL_STYLE_TERMS = ["high fashion", "runway inspired", "editorial inspired", "street luxe"];
-
-const SHOE_BUNDLE_KEYWORDS = ["shoes", "shoe bundle", "sneakers", "heels", "boots", "sandals"];
+const GLOBAL_STYLE_TERMS = ["streetwear", "vintage"];
+const SHOE_BUNDLE_KEYWORDS = ["shoes"];
 
 const memoryAssetTypeCache = new Map();
 let consecutive429 = 0;
@@ -264,7 +283,6 @@ function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
   if (subcategory && String(subcategory).trim()) url.searchParams.set("Subcategory", String(subcategory).trim());
   if (keyword && keyword.trim()) url.searchParams.set("Keyword", keyword.trim());
   if (cursor) url.searchParams.set("Cursor", cursor);
-
   return url.toString();
 }
 
@@ -473,16 +491,10 @@ async function ensureSchema() {
 
 async function getKnownAssetTypes(assetIds) {
   if (assetIds.length === 0) return new Map();
-
   const result = await pool.query(
-    `
-    SELECT asset_id, asset_type_id, asset_type_name
-    FROM public.catalog_items
-    WHERE asset_id = ANY($1::bigint[])
-    `,
+    `SELECT asset_id, asset_type_id, asset_type_name FROM public.catalog_items WHERE asset_id = ANY($1::bigint[])`,
     [assetIds]
   );
-
   const map = new Map();
   for (const row of result.rows) {
     map.set(String(row.asset_id), {
@@ -658,6 +670,15 @@ function buildPlan(runSeed) {
     });
   }
 
+  const bodyPlan = [];
+  for (const [tabKey, keywords] of Object.entries(BODY_KEYWORDS)) {
+    const slice = rotatedSlice(keywords, MAX_BODY_TERMS_PER_TAB, `${runSeed}:body:${tabKey}`);
+    bodyPlan.push({
+      tabKey,
+      passes: slice.map((kw) => ({ keyword: kw, categoryId: BODYPARTS_CATEGORY })),
+    });
+  }
+
   const globalStyle = rotatedSlice(GLOBAL_STYLE_TERMS, MAX_GLOBAL_TERMS_PER_RUN, `${runSeed}:global`);
   if (globalStyle.length > 0) {
     const allTab = clothingPlan.find((x) => x.tabKey === "all");
@@ -670,11 +691,10 @@ function buildPlan(runSeed) {
   for (const typeId of ACCESSORY_TYPES) {
     const keys = ACCESSORY_KEYWORDS[typeId] || [];
     const slice = rotatedSlice(keys, MAX_ACCESSORY_TERMS_PER_TYPE, `${runSeed}:acc:${typeId}`);
-
     const passes = [];
     for (const kw of slice) {
       for (const catId of ACCESSORY_DISCOVERY_CATEGORIES) {
-        // category 13 + many terms is noisy/400-prone. keep it for hair + generic only.
+        // keep category 13 conservative
         if (catId === 13 && !["hair", "hairstyle", "wig", "face accessory", "head accessory", "accessory"].includes(kw)) {
           continue;
         }
@@ -684,21 +704,7 @@ function buildPlan(runSeed) {
     accessoryPlan.push({ typeId, passes });
   }
 
-  // dedicated shared discovery passes (small budget, not per-type blast)
-  const sharedDiscoveryPasses = [];
-  const sharedSlice = rotatedSlice(
-    ACCESSORY_SHARED_DISCOVERY_TERMS,
-    Math.min(MAX_ACCESSORY_TERMS_PER_TYPE, 6),
-    `${runSeed}:acc:shared`
-  );
-  for (const kw of sharedSlice) {
-    for (const catId of ACCESSORY_DISCOVERY_CATEGORIES) {
-      if (catId === 13 && !["hair", "hairstyle", "wig"].includes(kw)) continue;
-      sharedDiscoveryPasses.push({ keyword: kw, categoryId: catId });
-    }
-  }
-
-  return { clothingPlan, accessoryPlan, sharedDiscoveryPasses };
+  return { clothingPlan, bodyPlan, accessoryPlan };
 }
 
 async function crawlPass(pass, tabKey, mode, pagesLimit) {
@@ -729,14 +735,18 @@ async function crawlPass(pass, tabKey, mode, pagesLimit) {
 
       if (mode === "accessory_type_target" && t !== pass.targetTypeId) continue;
 
-      const classified = classifyByType(
-        t,
-        mode === "clothing" ? "clothing" : "accessories",
-        tabKey
-      );
+      let classified;
+      if (mode === "body") {
+        classified = classifyByType(t, "body", tabKey);
+      } else if (mode === "accessory_type_target") {
+        classified = classifyByType(t, "accessories", tabKey);
+      } else {
+        classified = classifyByType(t, "clothing", tabKey);
+      }
 
       item.category = classified.category;
       item.subcategory = classified.subcategory || tabKey;
+
       await upsertItem(item);
       upserts += 1;
     }
@@ -745,22 +755,12 @@ async function crawlPass(pass, tabKey, mode, pagesLimit) {
     pages += 1;
     cursor = json.nextPageCursor || null;
     if (!cursor) break;
-
     await sleep(DELAY_MS + jitter(700));
   }
 
   console.log(
     `[crawl] mode=${mode} tab=${tabKey} kw="${pass.keyword}" cat=${pass.categoryId} pages=${pages} seen=${seen} upserts=${upserts}`
   );
-}
-
-async function crawlSharedAccessoryDiscovery(sharedPasses) {
-  if (!sharedPasses || sharedPasses.length === 0 || MAX_ACCESSORY_PAGES_PER_PASS <= 0) return;
-
-  for (const pass of sharedPasses) {
-    await crawlPass(pass, "all", "accessory_shared", 1);
-    await sleep(DELAY_MS + jitter(500));
-  }
 }
 
 async function crawlShoeBundles(runSeed) {
@@ -939,7 +939,7 @@ async function main() {
     await ensureSchema();
 
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
-    const { clothingPlan, accessoryPlan, sharedDiscoveryPasses } = buildPlan(runSeed);
+    const { clothingPlan, bodyPlan, accessoryPlan } = buildPlan(runSeed);
 
     if (MAX_CLOTHING_PAGES_PER_PASS > 0) {
       for (const tab of clothingPlan) {
@@ -952,6 +952,17 @@ async function main() {
       console.log("[crawl] clothing passes skipped (MAX_CLOTHING_PAGES_PER_PASS=0)");
     }
 
+    if (MAX_BODY_PAGES_PER_PASS > 0) {
+      for (const tab of bodyPlan) {
+        for (const pass of tab.passes) {
+          await crawlPass(pass, tab.tabKey, "body", MAX_BODY_PAGES_PER_PASS);
+          await sleep(DELAY_MS + jitter(500));
+        }
+      }
+    } else {
+      console.log("[crawl] body passes skipped (MAX_BODY_PAGES_PER_PASS=0)");
+    }
+
     if (MAX_ACCESSORY_PAGES_PER_PASS > 0) {
       for (const target of accessoryPlan) {
         const targetLabel = TYPE_TO_GROUP[target.typeId]?.subcategory || String(target.typeId);
@@ -960,8 +971,6 @@ async function main() {
           await sleep(DELAY_MS + jitter(500));
         }
       }
-
-      await crawlSharedAccessoryDiscovery(sharedDiscoveryPasses);
     } else {
       console.log("[crawl] accessory passes skipped (MAX_ACCESSORY_PAGES_PER_PASS=0)");
     }
