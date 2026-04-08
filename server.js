@@ -29,7 +29,7 @@ const FRONT_ACCESSORY_TYPE = 45;
 const BACK_ACCESSORY_TYPE = 46;
 const WAIST_ACCESSORY_TYPE = 47;
 const HAIR_TITLE_REGEX =
-  "(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|bun|braids?|twists?|locs?|dreads?|afro|coily|curly|wavy|straight|layers?|bob|pixie|wolf[ -]?cut|mullet)";
+  "((^|[^a-z])(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|bun|braids?|twists?|locs?|dreads?|afro|coily|curly|wavy|straight|layers?|bob|pixie|wolf[ -]?cut|mullet)([^a-z]|$))";
 
 const LAYERED_TYPES = [64, 65, 66, 67, 68, 69, 70, 71, 72];
 const ACCESSORY_UI_TYPES = [
@@ -272,7 +272,6 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    // cache namespace bump
     const cacheKey = `search:v13:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
@@ -284,7 +283,6 @@ app.get("/catalog/search", async (req, reply) => {
     const params = [category];
     let where = "WHERE lower(i.category) = $1";
 
-    // title-only search (name only)
     if (q.length > 0) {
       where += ` AND lower(coalesce(i.name,'')) LIKE $${params.length + 1}`;
       params.push(`%${q}%`);
@@ -295,7 +293,6 @@ app.get("/catalog/search", async (req, reply) => {
     if (spec.mode === "typed" || spec.mode === "classic") {
       where += ` AND i.asset_type_id = ANY($${params.length + 1}::int[])`;
       params.push(spec.allowedTypes);
-      // strict typed filtering for accessory/classic tabs
       if (category === "accessories" && subtab === "hair") {
         where += ` AND lower(coalesce(i.name,'')) ~ $${params.length + 1}`;
         params.push(HAIR_TITLE_REGEX);
@@ -324,7 +321,6 @@ app.get("/catalog/search", async (req, reply) => {
         where += ` AND i.asset_type_id = ANY($${layeredParamIdx}::int[])`;
       }
 
-      // layered first, fallback classic after
       orderSql = `
         CASE
           WHEN i.asset_type_id = ANY($${layeredParamIdx}::int[]) THEN 0
@@ -333,8 +329,6 @@ app.get("/catalog/search", async (req, reply) => {
         i.updated_at DESC,
         i.asset_id DESC
       `;
-    } else {
-      // mode all: no strict type slicing
     }
 
     params.push(limit, offset);

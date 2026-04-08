@@ -323,16 +323,8 @@ function isShoeLikeTitle(name) {
 
 function isHairLikeTitle(name) {
   const n = String(name || "").toLowerCase();
-  return (
-    n.includes("hair") ||
-    n.includes("bang") ||
-    n.includes("fringe") ||
-    n.includes("ponytail") ||
-    n.includes("pigtail") ||
-    n.includes("braid") ||
-    n.includes("bob") ||
-    n.includes("wolf cut") ||
-    n.includes("mullet")
+  return /(^|[^a-z])(hair|hairstyle|bangs?|fringe|ponytail|pigtails?|bun|braids?|twists?|locs?|dreads?|afro|coily|curly|wavy|straight|layers?|bob|pixie|wolf[ -]?cut|mullet)([^a-z]|$)/.test(
+    n
   );
 }
 
@@ -969,8 +961,12 @@ async function crawlHairDirectSubcategory() {
 
     for (const item of items) {
       const hasExplicitHairType = Number(item.asset_type_id) === HAIR_ACCESSORY_TYPE;
+      const normalizedTypeName = String(item.asset_type_name || "")
+        .toLowerCase()
+        .replace(/[^a-z]/g, "");
+      const hasHairTypeName = normalizedTypeName === "hairaccessory" || normalizedTypeName === "hair";
       const looksHairLike = isHairLikeTitle(item.name);
-      if (!hasExplicitHairType && !looksHairLike) continue;
+      if (!hasExplicitHairType && !hasHairTypeName && !looksHairLike) continue;
       item.asset_type_id = HAIR_ACCESSORY_TYPE;
       item.asset_type_name = "HairAccessory";
       item.category = "accessories";
