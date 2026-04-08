@@ -191,26 +191,15 @@ const BODY_TERMS = {
   hair: ["hair", "hairstyle", "wig", "ponytail", "braid", "curly hair", "wavy hair"],
 };
 
-// Temporary focus mode: dedicate accessory discovery budget to HairAccessory (41).
 const ACCESSORY_TERMS_BY_TYPE = {
-  41: [
-    "hair",
-    "hairstyle",
-    "hair accessory",
-    "wig",
-    "ponytail",
-    "pigtails",
-    "braid",
-    "bob",
-    "pixie",
-    "long hair",
-    "short hair",
-    "curly hair",
-    "wavy hair",
-    "straight hair",
-    "bangs",
-    "fringe",
-  ],
+  8: ["hat", "cap", "beanie", "hood", "crown"],
+  41: ["hair", "hairstyle", "wig", "ponytail", "braid", "curly", "wavy", "straight"],
+  42: ["face accessory", "mask", "glasses", "bangs", "fringe"],
+  43: ["necklace", "choker", "scarf", "collar"],
+  44: ["shoulder pet", "shoulder accessory", "pauldron"],
+  45: ["front accessory", "chain", "chest rig", "lanyard"],
+  46: ["back accessory", "wings", "cape", "backpack"],
+  47: ["waist accessory", "belt", "tail", "skirt accessory"],
 };
 
 let consecutive429 = 0;
@@ -830,9 +819,9 @@ function buildPlans(runSeed) {
         accessoryPlan.push({
           laneLabel: `accessories:type${typeId}:${kw}`,
           category: ACCESSORIES_CATEGORY,
-          subcategory: typeId === 41 ? "HairAccessory" : null,
+          subcategory: null,
           keyword: kw,
-          requiredAssetTypeId: typeId,
+          requiredAssetTypeId: null,
         });
       }
     }
