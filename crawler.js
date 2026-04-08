@@ -12,21 +12,34 @@ const pool = new Pool({
 const CLOTHING_CATEGORY = 3;
 const ACCESSORY_DISCOVERY_CATEGORIES = [11, 13];
 
-const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT || 30); // Roblox allows 10, 28, 30
-const MAX_PAGES_PER_PASS = Number(process.env.CRAWL_PAGES_PER_SUBTAB || 1);
+const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT || 30);
+
+// Separate pass budgets (important)
+const MAX_CLOTHING_PAGES_PER_PASS = Number(
+  process.env.CRAWL_PAGES_PER_CLOTHING_PASS ??
+    process.env.CRAWL_PAGES_PER_SUBTAB ??
+    1
+);
+const MAX_ACCESSORY_PAGES_PER_PASS = Number(
+  process.env.CRAWL_PAGES_PER_ACCESSORY_PASS ??
+    process.env.CRAWL_PAGES_PER_SUBTAB ??
+    1
+);
+
 const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 1);
 
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 7000);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 900);
-const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
+const INCLUDE_NOT_FOR_SALE =
+  String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
-const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 2);
-const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 4);
+const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 1);
+const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 3);
 const RETRY_BASE_MS = Number(process.env.CRAWL_RETRY_BASE_MS || 1200);
 const MAX_RETRY_BACKOFF_MS = Number(process.env.CRAWL_MAX_RETRY_BACKOFF_MS || 12000);
 
 const RATE_LIMIT_COOLDOWN_MS = Number(process.env.CRAWL_RATE_LIMIT_COOLDOWN_MS || 180000);
-const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 2);
+const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRIGGER || 5);
 
 const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 80);
 
@@ -35,16 +48,18 @@ const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERM
 const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 8);
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 18);
 
-const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 24);
-const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 3);
+const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 10);
+const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 1);
 const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 800);
-const HAIR_DIRECT_PAGES = Number(process.env.CRAWL_HAIR_DIRECT_PAGES || 8);
+const HAIR_DIRECT_PAGES = Number(process.env.CRAWL_HAIR_DIRECT_PAGES || 1);
 
-const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 6);
+const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 2);
 
 console.log("[startup] crawler config", {
   CRAWL_PAGE_LIMIT_raw: process.env.CRAWL_PAGE_LIMIT,
   PAGE_LIMIT_computed: PAGE_LIMIT,
+  CRAWL_PAGES_PER_CLOTHING_PASS_raw: process.env.CRAWL_PAGES_PER_CLOTHING_PASS,
+  CRAWL_PAGES_PER_ACCESSORY_PASS_raw: process.env.CRAWL_PAGES_PER_ACCESSORY_PASS,
   CRAWL_PAGES_PER_SUBTAB_raw: process.env.CRAWL_PAGES_PER_SUBTAB,
   CRAWL_SHOE_BUNDLE_PAGES_raw: process.env.CRAWL_SHOE_BUNDLE_PAGES,
   CRAWL_DELAY_MS_raw: process.env.CRAWL_DELAY_MS,
@@ -141,75 +156,85 @@ const CLOTHING_KEYWORDS = {
 };
 
 const ACCESSORY_KEYWORDS = {
-  [HAT_ACCESSORY_TYPE]: ["hat", "beanie", "cap", "crown", "headband", "beret", "helmet", "bucket hat", "hairclip", "tiara"],
+  [HAT_ACCESSORY_TYPE]: [
+    "hat",
+    "head accessory",
+    "headband",
+    "beanie",
+    "cap",
+    "beret",
+    "helmet",
+    "bucket hat",
+    "tiara",
+  ],
   [HAIR_ACCESSORY_TYPE]: [
     "hair",
     "hairstyle",
-    "long hair",
-    "short hair",
-    "medium hair",
-    "mid length hair",
-    "layered hair",
-    "straight hair",
-    "wavy hair",
-    "curly hair",
-    "coily hair",
-    "textured hair",
-    "messy hair",
-    "fluffy hair",
-    "with bangs",
-    "w bangs",
-    "w/ bangs",
-    "bangs",
-    "fringe",
+    "wig",
+    "mullet",
+    "wolf cut",
+    "pixie",
+    "bob",
     "ponytail",
-    "pigtails",
+    "braid",
     "braids",
-    "twists",
     "locs",
     "dreads",
-    "bun hair",
-    "updo hair",
-    "afro hair",
-    "bob hair",
-    "pixie hair",
-    "wolf cut",
-    "shag cut",
-    "butterfly cut",
-    "jellyfish cut",
-    "octopus cut",
-    "lob hair",
-    "bixie hair",
-    "mullet hair",
-    "y2k hair",
-    "emo hair",
-    "punk hair",
-    "grunge hair",
-    "blonde hair",
-    "blond hair",
-    "platinum blonde hair",
-    "ginger hair",
-    "red hair",
-    "auburn hair",
-    "brown hair",
-    "black hair",
-    "white hair",
-    "silver hair",
-    "gray hair",
-    "pink hair",
-    "blue hair",
-    "purple hair",
-    "green hair",
-    "orange hair",
-    "ombre hair",
-    "highlighted hair",
+    "updo",
+    "with bangs",
+    "w/ bangs",
+    "w bangs",
   ],
-  [FACE_ACCESSORY_TYPE]: ["face accessory", "mask", "face mask", "goggles", "visor", "sunglasses", "glasses", "anime face accessory", "blush face accessory"],
-  [NECK_ACCESSORY_TYPE]: ["necklace", "choker", "scarf", "tie", "bow tie", "pendant", "neck accessory", "collar", "chain necklace"],
-  [SHOULDER_ACCESSORY_TYPE]: ["shoulder accessory", "shoulder pet", "shoulder plush", "pauldron", "shoulder armor", "shoulder bag", "shoulder dragon", "shoulder cat"],
-  [FRONT_ACCESSORY_TYPE]: ["front accessory", "crossbody", "chest rig", "front bag", "harness", "vest accessory", "front pouch", "front satchel"],
-  [BACK_ACCESSORY_TYPE]: ["back accessory", "backpack", "wings", "cape", "sword back", "quiver", "jetpack", "tail accessory", "guitar back"],
-  [WAIST_ACCESSORY_TYPE]: ["waist accessory", "belt", "waist chain", "fanny pack", "hip bag", "utility belt", "waist skirt", "katana waist"],
+  [FACE_ACCESSORY_TYPE]: [
+    "face accessory",
+    "bangs",
+    "fringe",
+    "face bangs",
+    "mask",
+    "glasses",
+    "goggles",
+    "visor",
+    "sunglasses",
+  ],
+  [NECK_ACCESSORY_TYPE]: [
+    "neck accessory",
+    "necklace",
+    "choker",
+    "scarf",
+    "tie",
+    "pendant",
+    "chain necklace",
+  ],
+  [SHOULDER_ACCESSORY_TYPE]: [
+    "shoulder accessory",
+    "shoulder pet",
+    "shoulder plush",
+    "pauldron",
+    "shoulder bag",
+  ],
+  [FRONT_ACCESSORY_TYPE]: [
+    "front accessory",
+    "crossbody",
+    "front bag",
+    "harness",
+    "front pouch",
+  ],
+  [BACK_ACCESSORY_TYPE]: [
+    "back accessory",
+    "backpack",
+    "wings",
+    "cape",
+    "jetpack",
+    "guitar back",
+  ],
+  [WAIST_ACCESSORY_TYPE]: [
+    "waist accessory",
+    "belt",
+    "waist chain",
+    "fanny pack",
+    "hip bag",
+    "utility belt",
+  ],
 };
 
 const GLOBAL_STYLE_TERMS = [
@@ -225,21 +250,8 @@ const GLOBAL_STYLE_TERMS = [
   "signature style",
   "dark coquette",
   "soft grunge",
-  "kawaii goth",
-  "street goth",
   "cyber y2k",
   "futuristic y2k",
-  "avatarcore",
-  "animecore",
-  "scenecore",
-  "vampcore",
-  "celestialcore",
-  "spacecore",
-  "forestcore",
-  "royalcore",
-  "princesscore",
-  "visual kei",
-  "harajuku style",
 ];
 
 const SHOE_BUNDLE_KEYWORDS = [
@@ -264,75 +276,21 @@ const SHOE_BUNDLE_KEYWORDS = [
   "flats",
   "mary jane",
   "oxford shoes",
-  "chunky shoes",
-  "kitten heels",
-  "block heels",
-  "slingback heels",
-  "court shoes",
 ];
 
 const HAIR_FOCUS_KEYWORDS = [
-  "hair accessory",
   "hair",
   "hairstyle",
-  "long hair",
-  "short hair",
-  "medium hair",
-  "mid length hair",
-  "layered hair",
-  "straight hair",
-  "wavy hair",
-  "curly hair",
-  "coily hair",
-  "textured hair",
-  "messy hair",
-  "fluffy hair",
-  "with bangs",
-  "w bangs",
-  "w/ bangs",
-  "bob hair",
-  "pixie hair",
+  "wig",
+  "mullet",
   "wolf cut",
-  "shag cut",
-  "butterfly cut",
-  "jellyfish cut",
-  "octopus cut",
-  "lob hair",
-  "bixie hair",
-  "mullet hair",
-  "bangs",
-  "fringe",
+  "pixie",
+  "bob",
   "ponytail",
-  "pigtails",
-  "braids",
-  "twists",
-  "locs",
-  "dreads",
-  "bun hair",
-  "updo hair",
-  "afro hair",
-  "blonde hair",
-  "blond hair",
-  "platinum blonde hair",
-  "ginger hair",
-  "red hair",
-  "auburn hair",
-  "brown hair",
-  "black hair",
-  "white hair",
-  "silver hair",
-  "gray hair",
-  "pink hair",
-  "blue hair",
-  "purple hair",
-  "green hair",
-  "orange hair",
-  "ombre hair",
-  "highlighted hair",
-  "y2k hair",
-  "emo hair",
-  "punk hair",
-  "grunge hair",
+  "braid",
+  "with bangs",
+  "w/ bangs",
+  "w bangs",
 ];
 
 const memoryAssetTypeCache = new Map();
@@ -413,38 +371,6 @@ function isShoeLikeTitle(name) {
   );
 }
 
-const HAIR_TITLE_ANCHOR_RE =
-  /(^|[^a-z])(hair|hairstyle|hairdo|wig|weave|extensions?|ponytail|pigtails?|bun|updo|braids?|twists?|locs?|dreads?|afro|bob|lob|pixie|mullet|wolf[ -]?cut|shag|butterfly[ -]?cut|hime[ -]?cut|jellyfish[ -]?cut|octopus[ -]?cut)([^a-z]|$)/;
-const HAIR_BANGS_MOD_RE = /(^|[^a-z])(with|w\/|w)\s+bangs?([^a-z]|$)/;
-const HAIR_BANGS_WORD_RE = /(^|[^a-z])bangs?([^a-z]|$)/;
-const HAIR_STYLE_WORD_RE =
-  /(^|[^a-z])(curly|curls?|tight curls?|loose curls?|spiral curls?|ringlets?|coily|kinky|wavy|waves?|beachy?[ -]?waves?|straight|pin[ -]?straight|sleek|messy|tousled|layered|choppy|blunt[ -]?cut|feathered|textured|razored|tapered|shaggy|voluminous|fluffy|bouncy)([^a-z]|$)/;
-const HAIR_COLOR_WORD_RE =
-  /(^|[^a-z])(blonde|blond|platinum|ginger|red|auburn|brown|black|white|silver|gray|grey|pink|blue|purple|green|orange|teal|turquoise|lavender|lilac)([^a-z]|$)/;
-const HAIR_HAIR_CONTEXT_RE =
-  /(^|[^a-z])(hair|hairstyle|wig|bob|lob|pixie|ponytail|bun|updo|braids?|locs?|dreads?|curls?|waves?)([^a-z]|$)/;
-const HAIR_AESTHETIC_WORD_RE = /(^|[^a-z])(y2k|emo|punk|grunge|goth|kawaii)([^a-z]|$)/;
-
-function isHairLikeTitle(name) {
-  const n = String(name || "").toLowerCase();
-  const hasAnchor = HAIR_TITLE_ANCHOR_RE.test(n);
-  const hasBangsWord = HAIR_BANGS_WORD_RE.test(n);
-  const hasBangsModifier = HAIR_BANGS_MOD_RE.test(n);
-  const hasStyle = HAIR_STYLE_WORD_RE.test(n);
-  const hasColor = HAIR_COLOR_WORD_RE.test(n);
-  const hasHairContext = HAIR_HAIR_CONTEXT_RE.test(n);
-  const hasAesthetic = HAIR_AESTHETIC_WORD_RE.test(n);
-  const hasColorContext = hasColor && hasHairContext;
-
-  if (hasBangsWord && !hasBangsModifier && !hasAnchor) return false;
-
-  if (hasAnchor) return true;
-  if (hasBangsModifier && (hasStyle || hasColorContext || hasAesthetic || hasHairContext)) return true;
-  if (hasColorContext) return true;
-  if (hasAesthetic && hasHairContext) return true;
-  return false;
-}
-
 function isHairTypeCandidate(assetTypeId, assetTypeName) {
   const t = Number(assetTypeId);
   if (t === HAIR_ACCESSORY_TYPE) return true;
@@ -455,15 +381,6 @@ function isHairTypeCandidate(assetTypeId, assetTypeName) {
 function buildSearchUrl({ category, keyword, cursor, limit, subcategory }) {
   const url = new URL("https://catalog.roblox.com/v1/search/items/details");
   const finalLimit = Number(limit || PAGE_LIMIT);
-  if (String(process.env.CRAWL_DEBUG_SEARCH_LIMIT_LOGS || "false") === "true") {
-    console.log("[debug] using search limit", {
-      category,
-      keyword: keyword || "",
-      cursor: cursor || null,
-      requested_limit: limit ?? null,
-      final_limit: finalLimit,
-    });
-  }
 
   url.searchParams.set("Category", String(category));
   url.searchParams.set("Limit", String(finalLimit));
@@ -729,7 +646,7 @@ async function getKnownAssetTypes(assetIds) {
   return map;
 }
 
-async function enrichAssetTypes(items) {
+async function enrichAssetTypes(items, maxLookups = MAX_META_LOOKUPS_PER_PASS) {
   const ids = items.map((i) => i.asset_id).filter((id) => Number.isFinite(id));
   const knownMap = await getKnownAssetTypes(ids);
 
@@ -761,7 +678,7 @@ async function enrichAssetTypes(items) {
       continue;
     }
 
-    if (lookedUp >= MAX_META_LOOKUPS_PER_PASS) continue;
+    if (lookedUp >= maxLookups) continue;
 
     const details = await fetchAssetDetailsWithRetry(item.asset_id);
     if (details) {
@@ -898,9 +815,7 @@ function buildPlan(runSeed) {
   if (globalStyle.length > 0) {
     const allTab = clothingPlan.find((x) => x.tabKey === "all");
     if (allTab) {
-      for (const g of globalStyle) {
-        allTab.passes.push({ keyword: g, categoryId: CLOTHING_CATEGORY });
-      }
+      for (const g of globalStyle) allTab.passes.push({ keyword: g, categoryId: CLOTHING_CATEGORY });
     }
   }
 
@@ -920,13 +835,13 @@ function buildPlan(runSeed) {
   return { clothingPlan, accessoryPlan };
 }
 
-async function crawlPass(pass, tabKey, mode) {
+async function crawlPass(pass, tabKey, mode, pagesLimit) {
   let cursor = null;
   let pages = 0;
   let seen = 0;
   let upserts = 0;
 
-  while (pages < MAX_PAGES_PER_PASS) {
+  while (pages < pagesLimit) {
     const url = buildSearchUrl({
       category: pass.categoryId,
       keyword: pass.keyword,
@@ -986,21 +901,34 @@ async function crawlHairFocused(runSeed) {
   let forcedMetaLookups = 0;
 
   for (const keyword of hairTerms) {
-    for (const categoryId of [11, 13, CLOTHING_CATEGORY]) {
+    // Category 11 supports HairAccessory subcategory. Category 13 does not.
+    for (const categoryId of [11, 13]) {
       let cursor = null;
       let pages = 0;
 
       while (pages < HAIR_FOCUS_PAGES) {
-        const strictUrl = buildSearchUrl({
-          category: categoryId,
-          keyword,
-          cursor,
-          limit: PAGE_LIMIT,
-          subcategory: "HairAccessory",
-        });
+        let json = null;
 
-        let json = await fetchJsonWithRetry(strictUrl, SEARCH_RETRIES, `hair-focus-strict:${keyword}:cat${categoryId}`);
-        if (!json) {
+        if (categoryId === 11) {
+          const strictUrl = buildSearchUrl({
+            category: categoryId,
+            keyword,
+            cursor,
+            limit: PAGE_LIMIT,
+            subcategory: "HairAccessory",
+          });
+          json = await fetchJsonWithRetry(strictUrl, SEARCH_RETRIES, `hair-focus-strict:${keyword}:cat${categoryId}`);
+
+          if (!json) {
+            const fallbackUrl = buildSearchUrl({
+              category: categoryId,
+              keyword,
+              cursor,
+              limit: PAGE_LIMIT,
+            });
+            json = await fetchJsonWithRetry(fallbackUrl, SEARCH_RETRIES, `hair-focus-fallback:${keyword}:cat${categoryId}`);
+          }
+        } else {
           const fallbackUrl = buildSearchUrl({
             category: categoryId,
             keyword,
@@ -1009,13 +937,14 @@ async function crawlHairFocused(runSeed) {
           });
           json = await fetchJsonWithRetry(fallbackUrl, SEARCH_RETRIES, `hair-focus-fallback:${keyword}:cat${categoryId}`);
         }
+
         if (!json) break;
 
         const rows = Array.isArray(json.data) ? json.data : [];
         if (rows.length === 0) break;
 
         const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
-        await enrichAssetTypes(items);
+        await enrichAssetTypes(items, HAIR_META_LOOKUPS_PER_RUN);
 
         let upserts = 0;
         for (const item of items) {
@@ -1037,9 +966,8 @@ async function crawlHairFocused(runSeed) {
 
           item.asset_type_id = HAIR_ACCESSORY_TYPE;
           item.asset_type_name = "HairAccessory";
-          const classified = classifyByType(item.asset_type_id, "accessories", "hair");
-          item.category = classified.category;
-          item.subcategory = classified.subcategory;
+          item.category = "accessories";
+          item.subcategory = "hair";
           await upsertItem(item);
           upserts += 1;
         }
@@ -1063,67 +991,52 @@ async function crawlHairFocused(runSeed) {
 }
 
 async function crawlHairDirectSubcategory() {
-  let grandSeen = 0;
-  let grandUpserts = 0;
+  let cursor = null;
+  let pages = 0;
+  let totalSeen = 0;
+  let totalUpserts = 0;
 
-  for (const categoryId of [11, 13]) {
-    let cursor = null;
-    let pages = 0;
-    let totalSeen = 0;
-    let totalUpserts = 0;
+  while (pages < HAIR_DIRECT_PAGES) {
+    const url = buildSearchUrl({
+      category: 11,
+      keyword: "",
+      cursor,
+      limit: PAGE_LIMIT,
+      subcategory: "HairAccessory",
+    });
 
-    while (pages < HAIR_DIRECT_PAGES) {
-      const url = buildSearchUrl({
-        category: categoryId,
-        keyword: "",
-        cursor,
-        limit: PAGE_LIMIT,
-        subcategory: "HairAccessory",
-      });
+    const json = await fetchJsonWithRetry(url, SEARCH_RETRIES, "hair-direct:cat11");
+    if (!json) break;
 
-      const json = await fetchJsonWithRetry(url, SEARCH_RETRIES, `hair-direct:cat${categoryId}`);
-      if (!json) break;
+    const rows = Array.isArray(json.data) ? json.data : [];
+    if (rows.length === 0) break;
 
-      const rows = Array.isArray(json.data) ? json.data : [];
-      if (rows.length === 0) break;
+    const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
+    await enrichAssetTypes(items, HAIR_META_LOOKUPS_PER_RUN);
 
-      const items = rows.map(normalizeSearchItem).filter((i) => Number.isFinite(i.asset_id));
-      let upserts = 0;
-
-      for (const item of items) {
-        const hasExplicitHairType = Number(item.asset_type_id) === HAIR_ACCESSORY_TYPE;
-        const normalizedTypeName = String(item.asset_type_name || "")
-          .toLowerCase()
-          .replace(/[^a-z]/g, "");
-        const hasHairTypeName = normalizedTypeName === "hairaccessory" || normalizedTypeName === "hair";
-        if (!hasExplicitHairType && !hasHairTypeName) continue;
-        item.asset_type_id = HAIR_ACCESSORY_TYPE;
-        item.asset_type_name = "HairAccessory";
-        item.category = "accessories";
-        item.subcategory = "hair";
-        await upsertItem(item);
-        upserts += 1;
-      }
-
-      totalSeen += items.length;
-      totalUpserts += upserts;
-      pages += 1;
-
-      console.log(
-        `[crawl-hair-direct] cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts}`
-      );
-
-      cursor = json.nextPageCursor || null;
-      if (!cursor) break;
-      await sleep(DELAY_MS + jitter(500));
+    let upserts = 0;
+    for (const item of items) {
+      if (!isHairTypeCandidate(item.asset_type_id, item.asset_type_name)) continue;
+      item.asset_type_id = HAIR_ACCESSORY_TYPE;
+      item.asset_type_name = "HairAccessory";
+      item.category = "accessories";
+      item.subcategory = "hair";
+      await upsertItem(item);
+      upserts += 1;
     }
 
-    grandSeen += totalSeen;
-    grandUpserts += totalUpserts;
-    console.log(`[crawl-hair-direct] cat=${categoryId} totalSeen=${totalSeen} totalUpserts=${totalUpserts}`);
+    totalSeen += items.length;
+    totalUpserts += upserts;
+    pages += 1;
+
+    console.log(`[crawl-hair-direct] pages=${pages} seen=${items.length} upserts=${upserts}`);
+
+    cursor = json.nextPageCursor || null;
+    if (!cursor) break;
+    await sleep(DELAY_MS + jitter(500));
   }
 
-  console.log(`[crawl-hair-direct] all-cats totalSeen=${grandSeen} totalUpserts=${grandUpserts}`);
+  console.log(`[crawl-hair-direct] totalSeen=${totalSeen} totalUpserts=${totalUpserts}`);
 }
 
 async function crawlShoeBundles(runSeed) {
@@ -1300,22 +1213,31 @@ async function main() {
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
     const { clothingPlan, accessoryPlan } = buildPlan(runSeed);
 
+    // Always run hair lanes first.
     await crawlHairDirectSubcategory();
     await crawlHairFocused(runSeed);
 
-    for (const tab of clothingPlan) {
-      for (const pass of tab.passes) {
-        await crawlPass(pass, tab.tabKey, "clothing");
-        await sleep(DELAY_MS + jitter(500));
+    if (MAX_CLOTHING_PAGES_PER_PASS > 0) {
+      for (const tab of clothingPlan) {
+        for (const pass of tab.passes) {
+          await crawlPass(pass, tab.tabKey, "clothing", MAX_CLOTHING_PAGES_PER_PASS);
+          await sleep(DELAY_MS + jitter(500));
+        }
       }
+    } else {
+      console.log("[crawl] clothing passes skipped (MAX_CLOTHING_PAGES_PER_PASS=0)");
     }
 
-    for (const target of accessoryPlan) {
-      const targetLabel = TYPE_TO_GROUP[target.typeId]?.subcategory || String(target.typeId);
-      for (const pass of target.passes) {
-        await crawlPass(pass, targetLabel, "accessory_type_target");
-        await sleep(DELAY_MS + jitter(500));
+    if (MAX_ACCESSORY_PAGES_PER_PASS > 0) {
+      for (const target of accessoryPlan) {
+        const targetLabel = TYPE_TO_GROUP[target.typeId]?.subcategory || String(target.typeId);
+        for (const pass of target.passes) {
+          await crawlPass(pass, targetLabel, "accessory_type_target", MAX_ACCESSORY_PAGES_PER_PASS);
+          await sleep(DELAY_MS + jitter(500));
+        }
       }
+    } else {
+      console.log("[crawl] accessory passes skipped (MAX_ACCESSORY_PAGES_PER_PASS=0)");
     }
 
     await crawlShoeBundles(runSeed);
