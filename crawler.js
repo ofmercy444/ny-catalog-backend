@@ -14,7 +14,7 @@ const ACCESSORY_DISCOVERY_CATEGORIES = [11, 13];
 
 const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT || 30);
 
-// Separate pass budgets (important)
+// Separate page budgets by lane
 const MAX_CLOTHING_PAGES_PER_PASS = Number(
   process.env.CRAWL_PAGES_PER_CLOTHING_PASS ??
     process.env.CRAWL_PAGES_PER_SUBTAB ??
@@ -30,8 +30,7 @@ const SHOE_BUNDLE_PAGES = Number(process.env.CRAWL_SHOE_BUNDLE_PAGES || 1);
 
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS || 7000);
 const ASSET_META_DELAY_MS = Number(process.env.CRAWL_ASSET_META_DELAY_MS || 900);
-const INCLUDE_NOT_FOR_SALE =
-  String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
+const INCLUDE_NOT_FOR_SALE = String(process.env.INCLUDE_NOT_FOR_SALE || "true") === "true";
 
 const SEARCH_RETRIES = Number(process.env.CRAWL_SEARCH_RETRIES || 1);
 const DETAIL_RETRIES = Number(process.env.CRAWL_DETAIL_RETRIES || 3);
@@ -44,14 +43,14 @@ const RATE_LIMIT_STREAK_TRIGGER = Number(process.env.CRAWL_RATE_LIMIT_STREAK_TRI
 const MAX_META_LOOKUPS_PER_PASS = Number(process.env.CRAWL_MAX_META_LOOKUPS_PER_PASS || 80);
 
 const MAX_CLOTHING_TERMS_PER_TAB = Number(process.env.CRAWL_MAX_CLOTHING_TERMS_PER_TAB || 6);
-const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 8);
+const MAX_ACCESSORY_TERMS_PER_TYPE = Number(process.env.CRAWL_MAX_ACCESSORY_TERMS_PER_TYPE || 16);
 const MAX_GLOBAL_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_GLOBAL_TERMS_PER_RUN || 8);
 const MAX_SHOE_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_SHOE_TERMS_PER_RUN || 18);
 
-const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 10);
-const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 1);
-const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 800);
-const HAIR_DIRECT_PAGES = Number(process.env.CRAWL_HAIR_DIRECT_PAGES || 1);
+const MAX_HAIR_TERMS_PER_RUN = Number(process.env.CRAWL_MAX_HAIR_TERMS_PER_RUN || 16);
+const HAIR_FOCUS_PAGES = Number(process.env.CRAWL_HAIR_FOCUS_PAGES || 2);
+const HAIR_META_LOOKUPS_PER_RUN = Number(process.env.CRAWL_HAIR_META_LOOKUPS_PER_RUN || 1200);
+const HAIR_DIRECT_PAGES = Number(process.env.CRAWL_HAIR_DIRECT_PAGES || 2);
 
 const ROTATION_HOURS = Number(process.env.CRAWL_ROTATION_HOURS || 2);
 
@@ -815,7 +814,9 @@ function buildPlan(runSeed) {
   if (globalStyle.length > 0) {
     const allTab = clothingPlan.find((x) => x.tabKey === "all");
     if (allTab) {
-      for (const g of globalStyle) allTab.passes.push({ keyword: g, categoryId: CLOTHING_CATEGORY });
+      for (const g of globalStyle) {
+        allTab.passes.push({ keyword: g, categoryId: CLOTHING_CATEGORY });
+      }
     }
   }
 
@@ -898,10 +899,8 @@ async function crawlHairFocused(runSeed) {
 
   let totalSeen = 0;
   let totalUpserts = 0;
-  let forcedMetaLookups = 0;
 
   for (const keyword of hairTerms) {
-    // Category 11 supports HairAccessory subcategory. Category 13 does not.
     for (const categoryId of [11, 13]) {
       let cursor = null;
       let pages = 0;
@@ -929,6 +928,7 @@ async function crawlHairFocused(runSeed) {
             json = await fetchJsonWithRetry(fallbackUrl, SEARCH_RETRIES, `hair-focus-fallback:${keyword}:cat${categoryId}`);
           }
         } else {
+          // Category 13 fallback only (strict subcategory is unsupported there).
           const fallbackUrl = buildSearchUrl({
             category: categoryId,
             keyword,
@@ -948,26 +948,20 @@ async function crawlHairFocused(runSeed) {
 
         let upserts = 0;
         for (const item of items) {
-          let t = item.asset_type_id == null ? null : Number(item.asset_type_id);
+          const t = item.asset_type_id == null ? null : Number(item.asset_type_id);
 
-          if (t == null && forcedMetaLookups < HAIR_META_LOOKUPS_PER_RUN) {
-            const details = await fetchAssetDetailsWithRetry(item.asset_id);
-            if (details) {
-              const meta = extractAssetMeta(details);
-              item.asset_type_id = meta.asset_type_id;
-              item.asset_type_name = meta.asset_type_name;
-              t = meta.asset_type_id == null ? null : Number(meta.asset_type_id);
-            }
-            forcedMetaLookups += 1;
-            await sleep(ASSET_META_DELAY_MS);
+          // Broad ingestion: if it's canonical hair, mark hair subcategory.
+          if (isHairTypeCandidate(t, item.asset_type_name)) {
+            item.asset_type_id = HAIR_ACCESSORY_TYPE;
+            item.asset_type_name = "HairAccessory";
+            item.category = "accessories";
+            item.subcategory = "hair";
+          } else {
+            // Keep discovered accessory-ish items in accessories lane for later organization.
+            item.category = "accessories";
+            if (!item.subcategory) item.subcategory = "all";
           }
 
-          if (!isHairTypeCandidate(t, item.asset_type_name)) continue;
-
-          item.asset_type_id = HAIR_ACCESSORY_TYPE;
-          item.asset_type_name = "HairAccessory";
-          item.category = "accessories";
-          item.subcategory = "hair";
           await upsertItem(item);
           upserts += 1;
         }
@@ -977,7 +971,7 @@ async function crawlHairFocused(runSeed) {
         pages += 1;
 
         console.log(
-          `[crawl-hair] kw="${keyword}" cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts} forcedMetaLookups=${forcedMetaLookups}`
+          `[crawl-hair] kw="${keyword}" cat=${categoryId} pages=${pages} seen=${items.length} upserts=${upserts}`
         );
 
         cursor = json.nextPageCursor || null;
@@ -1213,7 +1207,7 @@ async function main() {
     const runSeed = String(Math.floor(Date.now() / (1000 * 60 * 60 * ROTATION_HOURS)));
     const { clothingPlan, accessoryPlan } = buildPlan(runSeed);
 
-    // Always run hair lanes first.
+    // Hair lanes first
     await crawlHairDirectSubcategory();
     await crawlHairFocused(runSeed);
 

@@ -59,7 +59,6 @@ const CLOTHING_SUBTAB_ALIASES = {
   "classic t-shirts": "classic_t_shirts",
   "classic t shirts": "classic_t_shirts",
   classic_t_shirts: "classic_t_shirts",
-
   shirts: "shirts",
   jackets: "jackets",
   sweaters: "sweaters",
@@ -94,306 +93,23 @@ const ACCESSORY_SUBTAB_ALIASES = {
 const ACCESSORY_SUBTAB_SET = new Set(Object.values(ACCESSORY_SUBTAB_ALIASES));
 const CLOTHING_SUBTAB_SET = new Set(Object.values(CLOTHING_SUBTAB_ALIASES));
 
-const HAIR_ANCHOR_TERMS = [
-  "hair",
-  "hairstyle",
-  "wig",
-  "weave",
-  "extensions",
-  "ponytail",
-  "pigtails",
-  "braid",
-  "braids",
-  "locs",
-  "dreads",
-  "bun",
-  "updo",
-  "bob",
-  "lob",
-  "pixie",
-  "mullet",
-  "wolf cut",
-  "shag",
-  "hime cut",
-  "jellyfish cut",
-  "octopus cut",
-  "butterfly cut",
-];
-
-const HAIR_STYLE_TERMS = [
-  "bun",
-  "double bun",
-  "space buns",
-  "odango",
-  "messy bun",
-  "sleek bun",
-  "low bun",
-  "high bun",
-  "ballerina bun",
-  "top knot",
-  "pigtails",
-  "high pigtails",
-  "low pigtails",
-  "twin tails",
-  "twintails",
-  "ponytail",
-  "high ponytail",
-  "low ponytail",
-  "side ponytail",
-  "bubble ponytail",
-  "braided ponytail",
-  "braid",
-  "french braid",
-  "dutch braid",
-  "fishtail braid",
-  "waterfall braid",
-  "crown braid",
-  "halo braid",
-  "micro braids",
-  "box braids",
-  "knotless braids",
-  "cornrows",
-  "twists",
-  "sideswept",
-  "side part",
-  "middle part",
-  "deep side part",
-  "bussdown",
-  "layered cut",
-  "choppy layers",
-  "feathered cut",
-  "shag cut",
-  "wolf cut",
-  "hime cut",
-  "blunt cut",
-  "asymmetrical cut",
-  "undercut",
-  "fade",
-  "curtain bangs",
-  "blunt bangs",
-  "wispy bangs",
-  "micro bangs",
-  "anime bangs",
-  "jagged bangs",
-  "spiky bangs",
-  "face framing strands",
-  "ahoge",
-  "double ahoge",
-  "triple ahoge",
-  "spiky hair",
-  "slick back",
-  "half up half down",
-  "half ponytail",
-  "afro puff",
-  "bantu knots",
-  "dreadlocks",
-  "locs",
-  "faux locs",
-  "weave",
-  "extensions",
-  "long flowing anime hair",
-  "pixie anime cut",
-  "bob anime cut",
-  "magical girl hair",
-];
-
-const HAIR_TEXTURE_TERMS = [
-  "curly",
-  "tight curls",
-  "loose curls",
-  "spiral curls",
-  "ringlets",
-  "coily",
-  "kinky",
-  "afro",
-  "fluffy",
-  "voluminous",
-  "wavy",
-  "beach waves",
-  "soft waves",
-  "deep waves",
-  "crimped",
-  "straight",
-  "pin straight",
-  "silky straight",
-  "sleek straight",
-  "glass hair",
-  "frizzy",
-  "messy",
-  "tousled",
-  "bedhead",
-  "windblown",
-  "airy",
-  "thick",
-  "coarse",
-  "fine",
-  "silky",
-  "smooth",
-  "dry",
-  "wet look",
-  "damp",
-  "piecey",
-  "feathered texture",
-  "choppy texture",
-  "defined curls",
-  "anime smooth",
-  "ultra smooth",
-  "glossy anime shine",
-  "stiff spikes",
-  "flowing strands",
-  "stylized locks",
-];
-
-const HAIR_COLOR_TERMS = [
-  "brunette",
-  "dark brunette",
-  "light brunette",
-  "ash brown",
-  "chocolate brown",
-  "chestnut",
-  "espresso",
-  "mocha",
-  "caramel",
-  "honey brown",
-  "ginger",
-  "auburn",
-  "copper",
-  "red",
-  "cherry red",
-  "burgundy",
-  "black",
-  "jet black",
-  "blue black",
-  "platinum",
-  "platinum blonde",
-  "icy blonde",
-  "ash blonde",
-  "golden blonde",
-  "honey blonde",
-  "dirty blonde",
-  "strawberry blonde",
-  "blond",
-  "silver",
-  "gray",
-  "white",
-  "pastel pink",
-  "hot pink",
-  "rose pink",
-  "lavender",
-  "lilac",
-  "purple",
-  "violet",
-  "baby blue",
-  "sky blue",
-  "teal",
-  "turquoise",
-  "mint green",
-  "neon green",
-  "emerald",
-  "forest green",
-  "ombre",
-  "balayage",
-  "highlights",
-  "lowlights",
-  "money piece",
-  "split dye",
-  "half and half",
-  "rainbow",
-  "holographic",
-  "iridescent",
-  "galaxy",
-  "gradient",
-  "dual tone",
-];
-
-const HAIR_AESTHETIC_TERMS = [
-  "y2k",
-  "kawaii",
-  "cute",
-  "soft girl",
-  "coquette",
-  "lolita",
-  "harajuku",
-  "magical girl",
-  "mahou shoujo",
-  "anime",
-  "anime schoolgirl",
-  "shonen",
-  "shoujo",
-  "goth",
-  "gothic",
-  "vampire",
-  "dark fantasy",
-  "light fantasy",
-  "isekai",
-  "elf",
-  "fantasy princess",
-  "anime idol",
-  "kpop",
-  "korean",
-  "ulzzang",
-  "japanese",
-  "streetwear",
-  "techwear",
-  "cyberpunk",
-  "futuristic",
-  "sci-fi",
-  "grunge",
-  "punk",
-  "emo",
-  "scene",
-  "e-girl",
-  "e-boy",
-  "gamer",
-  "vtuber",
-  "cosplay",
-  "chibi",
-  "manga style",
-  "cel shaded",
-  "2d style",
-  "3d anime hybrid",
-  "glossy anime",
-  "edgy anime",
-  "angelcore",
-  "demoncore",
-  "fairycore",
-  "cottagecore",
-  "dreamy",
-  "ethereal",
-  "surreal",
-];
-
-const HAIR_NOISE_TERMS = [
-  "horns",
-  "halo",
-  "headphones",
-  "mask",
-  "crown",
-  "helmet",
-];
-
-function escapeRegexTerm(term) {
-  return term
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\s+/g, "[ -]+");
-}
-
-function makeWordRegex(terms) {
-  const body = terms.map(escapeRegexTerm).join("|");
-  return new RegExp(`(^|[^a-z0-9])(?:${body})([^a-z0-9]|$)`, "i");
-}
-
-const HAIR_ANCHOR_RE = makeWordRegex(HAIR_ANCHOR_TERMS);
-const HAIR_STYLE_RE = makeWordRegex(HAIR_STYLE_TERMS);
-const HAIR_TEXTURE_RE = makeWordRegex(HAIR_TEXTURE_TERMS);
-const HAIR_COLOR_RE = makeWordRegex(HAIR_COLOR_TERMS);
-const HAIR_AESTHETIC_RE = makeWordRegex(HAIR_AESTHETIC_TERMS);
-const HAIR_NOISE_RE = makeWordRegex(HAIR_NOISE_TERMS);
+const HAIR_ANCHOR_RE =
+  /(^|[^a-z0-9])(hair|hairstyle|wig|weave|extensions?|ponytail|pigtails?|braids?|locs?|dreads?|bun|updo|bob|lob|pixie|mullet|wolf[ -]?cut|shag|hime[ -]?cut|jellyfish[ -]?cut|octopus[ -]?cut|butterfly[ -]?cut)([^a-z0-9]|$)/i;
+const HAIR_STYLE_RE =
+  /(^|[^a-z0-9])(bun|double bun|space buns|odango|ponytail|pigtails?|braids?|french braid|dutch braid|fishtail braid|cornrows|twists|layered|shag|wolf cut|hime cut|blunt cut|undercut|fade|bangs?|spiky hair|slick back|half up half down|bantu knots|dreadlocks|locs)([^a-z0-9]|$)/i;
+const HAIR_TEXTURE_RE =
+  /(^|[^a-z0-9])(curly|curls?|coily|kinky|wavy|waves?|crimped|straight|silky|sleek|glass hair|frizzy|messy|tousled|fluffy|voluminous|thick|coarse|fine|smooth|wet look|damp|defined curls|flowing strands)([^a-z0-9]|$)/i;
+const HAIR_COLOR_RE =
+  /(^|[^a-z0-9])(brunette|brown|blonde|blond|platinum|ginger|auburn|red|burgundy|black|jet black|silver|gray|grey|white|pink|purple|violet|blue|teal|turquoise|green|emerald|ombre|balayage|highlights|split dye|rainbow|holographic|iridescent|gradient)([^a-z0-9]|$)/i;
+const HAIR_AESTHETIC_RE =
+  /(^|[^a-z0-9])(y2k|kawaii|coquette|harajuku|magical girl|anime|goth|punk|emo|grunge|streetwear|techwear|cyberpunk|futuristic|cosplay|vtuber|chibi|angelcore|demoncore|fairycore)([^a-z0-9]|$)/i;
 const HAIR_BANGS_WORD_RE = /(^|[^a-z0-9])bangs?([^a-z0-9]|$)/i;
 const HAIR_BANGS_MOD_RE = /(^|[^a-z0-9])(with|w\/|w)\s+bangs?([^a-z0-9]|$)/i;
+const HAIR_NOISE_RE = /(^|[^a-z0-9])(horns|halo|headphones|mask|crown|helmet)([^a-z0-9]|$)/i;
 
 function computeHairScore(title, assetTypeId) {
   const t = String(title || "").toLowerCase();
+
   const hasAnchor = HAIR_ANCHOR_RE.test(t);
   const hasStyle = HAIR_STYLE_RE.test(t);
   const hasTexture = HAIR_TEXTURE_RE.test(t);
@@ -403,10 +119,6 @@ function computeHairScore(title, assetTypeId) {
   const hasBangsWord = HAIR_BANGS_WORD_RE.test(t);
   const hasBangsMod = HAIR_BANGS_MOD_RE.test(t);
 
-  // Hard requirements:
-  // 1) anchor present
-  // 2) style OR texture
-  // 3) bangs disambiguation
   if (!hasAnchor) return { approved: false, score: 0 };
   if (!hasStyle && !hasTexture) return { approved: false, score: 0 };
   if (hasBangsWord && !hasBangsMod && !hasStyle && !hasTexture) return { approved: false, score: 0 };
@@ -459,10 +171,7 @@ function getSubtabSpec(category, subtab) {
     if (subtab === "front") return { mode: "typed", allowedTypes: [FRONT_ACCESSORY_TYPE] };
     if (subtab === "back") return { mode: "typed", allowedTypes: [BACK_ACCESSORY_TYPE] };
     if (subtab === "waist") return { mode: "typed", allowedTypes: [WAIST_ACCESSORY_TYPE] };
-
-    // Hair subtab now uses quality-gate mode against all accessories.
     if (subtab === "hair") return { mode: "hair_qualified", allowedTypes: ACCESSORY_UI_TYPES };
-
     return { mode: "typed", allowedTypes: ACCESSORY_UI_TYPES };
   }
 
@@ -679,7 +388,7 @@ app.get("/catalog/search", async (req, reply) => {
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 60);
     const offset = Math.max(Number(req.query.offset || 0), 0);
 
-    const cacheKey = `search:v20:${category}:${subtab}:${q}:${limit}:${offset}`;
+    const cacheKey = `search:v21:${category}:${subtab}:${q}:${limit}:${offset}`;
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -767,8 +476,6 @@ app.get("/catalog/search", async (req, reply) => {
       ({ rows } = await pool.query(sql, params));
       nextOffset = rows.length === limit ? offset + limit : null;
     } else if (category === "accessories" && spec.mode === "hair_qualified") {
-      // Query broader accessory pool, then apply the quality gate in JS.
-      // Overscan to keep pagination useful after filtering.
       const params = ["accessories", spec.allowedTypes];
       let where = `
         WHERE lower(i.category) = $1
@@ -780,7 +487,7 @@ app.get("/catalog/search", async (req, reply) => {
         where += ` AND lower(coalesce(i.name,'')) LIKE $${params.length}`;
       }
 
-      const fetchLimit = Math.min(320, Math.max(120, limit * 6 + offset));
+      const fetchLimit = Math.min(400, Math.max(140, limit * 8 + offset));
       params.push(fetchLimit);
 
       const sql = `
@@ -793,8 +500,7 @@ app.get("/catalog/search", async (req, reply) => {
       ({ rows } = await pool.query(sql, params));
 
       const filtered = rows.filter((r) => computeHairScore(r.name, r.asset_type_id).approved);
-      const page = filtered.slice(offset, offset + limit);
-      rows = page;
+      rows = filtered.slice(offset, offset + limit);
       nextOffset = filtered.length > offset + limit ? offset + limit : null;
     } else {
       const params = [category];
